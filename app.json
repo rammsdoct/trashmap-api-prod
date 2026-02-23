@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Trashmap",
-    "slug": "Trashmap",
+    "name": "PresaWatch",
+    "slug": "presawatch",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -14,23 +14,18 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.dankenet.trashmap"
+      "bundleIdentifier": "com.dankenet.presawatch"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.dankenet.trashmap",
+      "package": "com.dankenet.presawatch",
       "edgeToEdgeEnabled": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    },
-    "extra": {
-      "eas": {
-        "projectId": "afe0c68b-dad1-43e2-b138-afddccd74099"
-      }
     }
   }
 }
