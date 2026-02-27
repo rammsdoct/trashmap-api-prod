@@ -18,6 +18,11 @@ ext {
     compileSdkVersion = 35
     targetSdkVersion  = 35
     ndkVersion        = "27.1.12297006"
+    // react-native-geolocation-service defaults to play-services-location:18.0.0
+    // where FusedLocationProviderClient was a class. On modern GMS (API 35 device)
+    // it's an interface → IncompatibleClassChangeError at runtime. Force 21.x so
+    // D8 emits invoke-interface bytecode instead of invoke-virtual.
+    playServicesLocationVersion = "21.3.0"
 }
 
 allprojects {
@@ -25,6 +30,16 @@ allprojects {
     google()
     mavenCentral()
     maven { url 'https://www.jitpack.io' }
+  }
+  // Force a consistent play-services-location version across all modules.
+  // react-native-geolocation-service defaults to 18.0.0 where FusedLocationProviderClient
+  // was a concrete class. Modern device GMS exposes it as an interface → ART throws
+  // IncompatibleClassChangeError (invoke-virtual on interface). Forcing 21.x makes D8
+  // emit invoke-interface instead.
+  configurations.all {
+    resolutionStrategy {
+      force 'com.google.android.gms:play-services-location:21.3.0'
+    }
   }
 }
 

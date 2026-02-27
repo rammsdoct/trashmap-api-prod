@@ -13,6 +13,7 @@ export const FIREBASE_CONFIG = {
   appId: "1:344850391677:web:be62d08cb1fc8e68ce4714",
 };
 
+// Web client (type 3) from google-services.json — must match for Firebase Auth
 export const GOOGLE_SIGNIN_WEB_CLIENT_ID =
   "344850391677-1tb14ebp1hl2g4calkbnaamo49gle79f.apps.googleusercontent.com";
 

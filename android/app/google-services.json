@@ -22,7 +22,15 @@
           }
         },
         {
-          "client_id": "344850391677-dnu9erichkubv9dk4q5gqp9hgqlstjiu.apps.googleusercontent.com",
+          "client_id": "344850391677-t7uccu1s9uq9p23p7ikek4sb8dljrtrn.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.dankenet.presawatch",
+            "certificate_hash": "46b6bedb1f145e18f4aa75d6c735080f8d4ac7e8"
+          }
+        },
+        {
+          "client_id": "344850391677-1tb14ebp1hl2g4calkbnaamo49gle79f.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
@@ -35,7 +43,7 @@
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "344850391677-dnu9erichkubv9dk4q5gqp9hgqlstjiu.apps.googleusercontent.com",
+              "client_id": "344850391677-1tb14ebp1hl2g4calkbnaamo49gle79f.apps.googleusercontent.com",
               "client_type": 3
             }
           ]

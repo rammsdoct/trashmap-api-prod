@@ -11,6 +11,7 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Share,
 } from "react-native";
 import MapView, { Marker, Callout } from "react-native-maps";
 import Geolocation from "react-native-geolocation-service";
@@ -53,6 +54,13 @@ function BottomSheet({ visible, onClose, title, children }) {
   );
 }
 
+function alertError(title, message) {
+  Alert.alert(title, message, [
+    { text: "Copiar", onPress: () => Share.share({ message: `${title}\n${message}` }) },
+    { text: "OK", style: "cancel" },
+  ]);
+}
+
 export default function App() {
   const mapRef = useRef(null);
 
@@ -73,8 +81,8 @@ export default function App() {
 
   const region = useMemo(
     () => ({
-      latitude: 19.4326,
-      longitude: -101.253,
+      latitude: 19.6218807,
+      longitude: -101.2552132,
       latitudeDelta: 0.05,
       longitudeDelta: 0.05,
     }),
@@ -93,18 +101,23 @@ export default function App() {
     setSigningIn(true);
     try {
       await GoogleSignin.hasPlayServices();
-      const { data } = await GoogleSignin.signIn();
-      const credential = GoogleAuthProvider.credential(data.idToken);
+      const result = await GoogleSignin.signIn();
+      // v14: signIn() returns { type, data } instead of throwing on cancel
+      if (result.type !== "success") return;
+      if (!result.data.idToken) {
+        alertError("Error", "Google no devolvió un token. Intenta de nuevo.");
+        return;
+      }
+      const credential = GoogleAuthProvider.credential(result.data.idToken);
       await signInWithCredential(auth, credential);
     } catch (error) {
-      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
-        // user cancelled, do nothing
-      } else if (error.code === statusCodes.IN_PROGRESS) {
-        // already in progress, do nothing
+      console.error("signInWithGoogle error:", error);
+      if (error.code === statusCodes.IN_PROGRESS) {
+        // already signing in, ignore
       } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-        Alert.alert("Error", "Google Play Services no está disponible.");
+        alertError("Error", "Google Play Services no está disponible.");
       } else {
-        Alert.alert("Error", "No se pudo iniciar sesión con Google.");
+        alertError("Error al iniciar sesión", `${error.code ?? ""}: ${error.message ?? "sin mensaje"}`);
       }
     } finally {
       setSigningIn(false);
@@ -194,6 +207,19 @@ export default function App() {
     }
   };
 
+  const focusReport = (report) => {
+    if (!report) return;
+    mapRef.current?.animateToRegion(
+      {
+        latitude: report.latitude,
+        longitude: report.longitude,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      },
+      600
+    );
+  };
+
   const openCreateModal = () => {
     if (!user) {
       setShowLogin(true);
@@ -249,16 +275,27 @@ export default function App() {
         style={StyleSheet.absoluteFillObject}
         initialRegion={region}
         showsUserLocation
+        zoomEnabled
+        scrollEnabled
       >
         {filteredReports.map((r) => (
           <Marker
             key={r.id}
             coordinate={{ latitude: r.latitude, longitude: r.longitude }}
+            pinColor={r.status === "open" ? "#EF4444" : "#6B7280"}
+            onCalloutPress={() => focusReport(r)}
           >
             <Callout>
-              <View style={{ maxWidth: 200 }}>
-                <Text style={{ fontWeight: "bold" }}>{r.title}</Text>
-                <Text>{r.status}</Text>
+              <View style={{ maxWidth: 220 }}>
+                <Text style={{ fontWeight: "bold", marginBottom: 2 }}>{r.title}</Text>
+                {!!r.description && (
+                  <Text style={{ fontSize: 12, color: "#374151", marginBottom: 4 }}>
+                    {r.description}
+                  </Text>
+                )}
+                <Text style={{ fontSize: 11, color: r.status === "open" ? "#EF4444" : "#6B7280", fontWeight: "600" }}>
+                  {r.status?.toUpperCase()}
+                </Text>
               </View>
             </Callout>
           </Marker>
@@ -293,7 +330,7 @@ export default function App() {
                   selectedStatus === s && styles.filterTextActive,
                 ]}
               >
-                {s.toUpperCase()}
+                {s === "all" ? "TODOS" : s === "open" ? "ABIERTOS" : "CERRADOS"}
               </Text>
             </TouchableOpacity>
           ))}
@@ -315,7 +352,7 @@ export default function App() {
 
         {!user && (
           <TouchableOpacity style={styles.loginFab} onPress={() => setShowLogin(true)}>
-            <Text style={{ color: "white" }}>Login</Text>
+            <Text style={{ color: "white" }}>Ingresar</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -406,8 +443,8 @@ export default function App() {
 const styles = StyleSheet.create({
   userBox: {
     position: "absolute",
-    top: 40,
-    right: 20,
+    top: 86,
+    right: 14,
     zIndex: 50,
     backgroundColor: "white",
     padding: 8,
