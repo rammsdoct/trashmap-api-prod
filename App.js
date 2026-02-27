@@ -13,38 +13,31 @@ import {
   Alert,
 } from "react-native";
 import MapView, { Marker, Callout } from "react-native-maps";
-import * as Location from "expo-location";
+import Geolocation from "react-native-geolocation-service";
+import { PermissionsAndroid } from "react-native";
 import axios from "axios";
 
 import { auth } from "./firebase";
-import {
-  GoogleAuthProvider,
-  signInWithCredential,
-  onAuthStateChanged,
-  signOut,
-} from "firebase/auth";
+import { GoogleAuthProvider, signInWithCredential, onAuthStateChanged, signOut } from "firebase/auth";
+import { GoogleSignin, statusCodes } from "@react-native-google-signin/google-signin";
+import { GOOGLE_SIGNIN_WEB_CLIENT_ID, API_URL } from "./config";
 
-import * as WebBrowser from "expo-web-browser";
-import * as Google from "expo-auth-session/providers/google";
-import * as AuthSession from "expo-auth-session";
+GoogleSignin.configure({
+  webClientId: GOOGLE_SIGNIN_WEB_CLIENT_ID,
+});
 
-// Recomendado por AuthSession para cerrar sesiones/popup correctamente
-WebBrowser.maybeCompleteAuthSession();
+const API = API_URL;
 
-const API =
-  "https://trashmap-api-presamordor-e0csfsedadffd9ey.canadacentral-01.azurewebsites.net/reports"; // [1](https://solerainc-my.sharepoint.com/personal/esteban_salto_solera_com/Documents/Microsoft%20Copilot%20Chat%20Files/App%20%281%29.js)
-
-/** ---------- Bottom Sheet Modal (Drop-off) ---------- */
+/** ---------- Bottom Sheet Modal ---------- */
 function BottomSheet({ visible, onClose, title, children }) {
   return (
     <Modal
       visible={visible}
       transparent
-      animationType="slide" // slide desde abajo [2](https://reactnative.dev/docs/modal)
+      animationType="slide"
       onRequestClose={onClose}
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
-        {/* evita que el click dentro cierre */}
         <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHandle} />
@@ -53,7 +46,6 @@ function BottomSheet({ visible, onClose, title, children }) {
               <Text style={styles.sheetClose}>✕</Text>
             </TouchableOpacity>
           </View>
-
           <View style={styles.sheetContent}>{children}</View>
         </Pressable>
       </Pressable>
@@ -64,24 +56,8 @@ function BottomSheet({ visible, onClose, title, children }) {
 export default function App() {
   const mapRef = useRef(null);
 
-  // ⚠️ IMPORTANTE: el scheme debe existir en app.json para builds (warning que viste) [3](https://docs.expo.dev/versions/latest/sdk/auth-session/)
-  // Ajusta aquí el scheme para que coincida con tu app.json/app.config.js.
-  const redirectUri = AuthSession.makeRedirectUri({
-    scheme: "presawatch", // [1](https://solerainc-my.sharepoint.com/personal/esteban_salto_solera_com/Documents/Microsoft%20Copilot%20Chat%20Files/App%20%281%29.js)
-  });
-
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    // Para Expo Go normalmente necesitas expoClientId (Web app con redirect auth.expo.io)
-    // expoClientId: "PEGA_TU_EXPO_CLIENT_ID",
-    androidClientId:
-      "890052014169-4672ttjupn05hhf92oh2l0cb2lnat1v9.apps.googleusercontent.com", // [1](https://solerainc-my.sharepoint.com/personal/esteban_salto_solera_com/Documents/Microsoft%20Copilot%20Chat%20Files/App%20%281%29.js)
-    webClientId:
-      "890052014169-bd5h39u45vk2g1d0a3uu3fcig7ut2er6.apps.googleusercontent.com", // [1](https://solerainc-my.sharepoint.com/personal/esteban_salto_solera_com/Documents/Microsoft%20Copilot%20Chat%20Files/App%20%281%29.js)
-    responseType: "id_token",
-    redirectUri,
-  });
-
   const [user, setUser] = useState(null);
+  const [signingIn, setSigningIn] = useState(false);
 
   const [reports, setReports] = useState([]);
   const [selectedStatus, setSelectedStatus] = useState("all");
@@ -91,7 +67,6 @@ export default function App() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
 
-  // campos crear reporte
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newStatus, setNewStatus] = useState("open");
@@ -99,38 +74,49 @@ export default function App() {
   const region = useMemo(
     () => ({
       latitude: 19.4326,
-      longitude: -101.253, // lo dejé como lo tenías; puedes ajustar a -99.1332 si quieres CDMX
+      longitude: -101.253,
       latitudeDelta: 0.05,
       longitudeDelta: 0.05,
     }),
     []
   );
 
-  // auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser || null);
-      // si loguea, cerramos modal login
       if (currentUser) setShowLogin(false);
     });
     return unsubscribe;
   }, []);
 
-  // Google response → Firebase credential
-  useEffect(() => {
-    if (response?.type === "success") {
-      const idToken = response?.params?.id_token;
-      if (!idToken) {
-        console.log("No id_token received");
-        return;
+  const signInWithGoogle = async () => {
+    setSigningIn(true);
+    try {
+      await GoogleSignin.hasPlayServices();
+      const { data } = await GoogleSignin.signIn();
+      const credential = GoogleAuthProvider.credential(data.idToken);
+      await signInWithCredential(auth, credential);
+    } catch (error) {
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        // user cancelled, do nothing
+      } else if (error.code === statusCodes.IN_PROGRESS) {
+        // already in progress, do nothing
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        Alert.alert("Error", "Google Play Services no está disponible.");
+      } else {
+        Alert.alert("Error", "No se pudo iniciar sesión con Google.");
       }
-      const credential = GoogleAuthProvider.credential(idToken);
-      signInWithCredential(auth, credential).catch((err) => {
-        console.log("Firebase error:", err);
-        Alert.alert("Error", "No se pudo iniciar sesión con Firebase.");
-      });
+    } finally {
+      setSigningIn(false);
     }
-  }, [response]);
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await GoogleSignin.signOut();
+    } catch (_) {}
+    signOut(auth);
+  };
 
   const fetchReports = async () => {
     setLoadingReports(true);
@@ -171,14 +157,29 @@ export default function App() {
       }));
   }, [reports, selectedStatus]);
 
+  const requestLocationPermission = async () => {
+    const result = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+    );
+    return result === PermissionsAndroid.RESULTS.GRANTED;
+  };
+
+  const getCurrentPosition = () =>
+    new Promise((resolve, reject) =>
+      Geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 15000,
+      })
+    );
+
   const goToMyLocation = async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
+      const hasPermission = await requestLocationPermission();
+      if (!hasPermission) {
         Alert.alert("Permiso requerido", "Activa permisos de ubicación.");
         return;
       }
-      const location = await Location.getCurrentPositionAsync({});
+      const location = await getCurrentPosition();
       mapRef.current?.animateToRegion(
         {
           latitude: location.coords.latitude,
@@ -209,13 +210,13 @@ export default function App() {
 
     setCreating(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
+      const hasPermission = await requestLocationPermission();
+      if (!hasPermission) {
         Alert.alert("Permiso requerido", "Activa permisos de ubicación.");
         return;
       }
 
-      const location = await Location.getCurrentPositionAsync({});
+      const location = await getCurrentPosition();
       const payload = {
         title: newTitle.trim(),
         description: newDesc.trim(),
@@ -226,13 +227,11 @@ export default function App() {
 
       await axios.post(API, payload);
 
-      // reset form
       setNewTitle("");
       setNewDesc("");
       setNewStatus("open");
       setShowCreate(false);
 
-      // refresh list/markers
       fetchReports();
       Alert.alert("Listo", "Reporte creado correctamente.");
     } catch (e) {
@@ -245,7 +244,6 @@ export default function App() {
 
   return (
     <View style={{ flex: 1 }}>
-      {/* MAPA COMO FONDO (fix clave) */}
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
@@ -267,21 +265,18 @@ export default function App() {
         ))}
       </MapView>
 
-      {/* OVERLAYS */}
       <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
-        {/* Caja usuario */}
         {user && (
           <View style={styles.userBox} pointerEvents="auto">
             <Text style={{ fontSize: 12 }} numberOfLines={1}>
               {user.displayName || user.email || "Usuario"}
             </Text>
-            <TouchableOpacity onPress={() => signOut(auth)}>
+            <TouchableOpacity onPress={handleSignOut}>
               <Text style={{ color: "red", fontSize: 10 }}>Cerrar sesión</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Barra de filtros simple */}
         <View style={styles.filterRow} pointerEvents="auto">
           {["all", "open", "closed"].map((s) => (
             <TouchableOpacity
@@ -310,17 +305,14 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* FAB Ubicación */}
         <TouchableOpacity style={styles.locBtn} onPress={goToMyLocation}>
           <Text style={{ color: "white", fontSize: 18 }}>📍</Text>
         </TouchableOpacity>
 
-        {/* FAB Crear reporte */}
         <TouchableOpacity style={styles.addBtn} onPress={openCreateModal}>
           <Text style={{ color: "white", fontSize: 22 }}>＋</Text>
         </TouchableOpacity>
 
-        {/* FAB Login (si no hay user) */}
         {!user && (
           <TouchableOpacity style={styles.loginFab} onPress={() => setShowLogin(true)}>
             <Text style={{ color: "white" }}>Login</Text>
@@ -328,7 +320,6 @@ export default function App() {
         )}
       </View>
 
-      {/* MODAL LOGIN (drop-off) */}
       <BottomSheet
         visible={showLogin}
         onClose={() => setShowLogin(false)}
@@ -337,21 +328,19 @@ export default function App() {
         <Text style={styles.sheetHint}>
           Inicia sesión con Google para crear reportes.
         </Text>
-
         <TouchableOpacity
-          disabled={!request}
-          style={[styles.primaryBtn, !request && { opacity: 0.6 }]}
-          onPress={() => promptAsync()}
+          style={[styles.primaryBtn, signingIn && { opacity: 0.6 }]}
+          onPress={signInWithGoogle}
+          disabled={signingIn}
         >
-          <Text style={styles.primaryBtnText}>Continuar con Google</Text>
+          {signingIn ? (
+            <ActivityIndicator color="white" />
+          ) : (
+            <Text style={styles.primaryBtnText}>Continuar con Google</Text>
+          )}
         </TouchableOpacity>
-
-        <Text style={styles.sheetSmall}>
-          Tip: para producción, asegúrate de configurar el scheme en app.json. [3](https://docs.expo.dev/versions/latest/sdk/auth-session/)
-        </Text>
       </BottomSheet>
 
-      {/* MODAL CREAR REPORTE (drop-off) */}
       <BottomSheet
         visible={showCreate}
         onClose={() => setShowCreate(false)}
@@ -558,12 +547,6 @@ const styles = StyleSheet.create({
 
   sheetHint: {
     color: "#374151",
-  },
-
-  sheetSmall: {
-    color: "#6B7280",
-    fontSize: 12,
-    marginTop: 6,
   },
 
   primaryBtn: {
