@@ -76,10 +76,6 @@ En dispositivos fisicos, conecta Metro con:
 adb reverse tcp:8081 tcp:8081
 ```
 
-Este proyecto es React Native "bare" - no Expo Go. Requiere build nativo.
-
----
-
 ### Configuracion
 
 Toda la config vive en `config.js`. El repo ya trae valores de desarrollo.
@@ -93,7 +89,6 @@ Si quieres usar tus propias credenciales, actualiza:
 | `GOOGLE_MAPS_API_KEY` | Google Cloud Console -> APIs & Services -> Credentials |
 | `API_URL` | Tu backend |
 
-Google Sign-In (debug): cada dev tiene su propio SHA-1. Para evitar `developer_error`:
 
 ```bash
 cd android && ./gradlew signingReport
@@ -102,8 +97,6 @@ cd android && ./gradlew signingReport
 Agrega el SHA-1 (debug) en Firebase Console -> Project settings -> Your Android app,
 descarga de nuevo `android/app/google-services.json` y reemplazalo en el repo.
 
-Maps API key: tambien se usa en `android/app/src/main/AndroidManifest.xml`. Restringe la key a:
-`package com.dankenet.presawatch` + SHA-1 debug.
 
 ---
 
@@ -253,9 +246,6 @@ For physical devices, connect Metro with:
 adb reverse tcp:8081 tcp:8081
 ```
 
-This is a bare React Native project - no Expo Go. A native build is required.
-
----
 
 ### Configuration
 
@@ -270,7 +260,6 @@ If you want your own credentials, update:
 | `GOOGLE_MAPS_API_KEY` | Google Cloud Console -> APIs & Services -> Credentials |
 | `API_URL` | Your backend |
 
-Google Sign-In (debug): every dev has a unique SHA-1. To avoid `developer_error`:
 
 ```bash
 cd android && ./gradlew signingReport
@@ -279,8 +268,6 @@ cd android && ./gradlew signingReport
 Add the debug SHA-1 in Firebase Console -> Project settings -> Your Android app,
 re-download `android/app/google-services.json` and replace it in the repo.
 
-Maps API key: also referenced in `android/app/src/main/AndroidManifest.xml`. Restrict it to:
-`package com.dankenet.presawatch` + debug SHA-1.
 
 ---
 
