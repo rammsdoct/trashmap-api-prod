@@ -11,40 +11,35 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Share,
 } from "react-native";
-import MapView, { Marker, Callout } from "react-native-maps";
-import * as Location from "expo-location";
+import MapView, { Marker } from "react-native-maps";
+import Geolocation from "react-native-geolocation-service";
+import { PermissionsAndroid } from "react-native";
 import axios from "axios";
 
 import { auth } from "./firebase";
-import {
-  GoogleAuthProvider,
-  signInWithCredential,
-  onAuthStateChanged,
-  signOut,
-} from "firebase/auth";
+import { GoogleAuthProvider, signInWithCredential, onAuthStateChanged, signOut } from "firebase/auth";
+import { GoogleSignin, statusCodes } from "@react-native-google-signin/google-signin";
+import { GOOGLE_SIGNIN_WEB_CLIENT_ID, API_URL } from "./config";
 
-import * as WebBrowser from "expo-web-browser";
-import * as Google from "expo-auth-session/providers/google";
-import * as AuthSession from "expo-auth-session";
+GoogleSignin.configure({
+  webClientId: GOOGLE_SIGNIN_WEB_CLIENT_ID,
+});
 
-// Recomendado por AuthSession para cerrar sesiones/popup correctamente
-WebBrowser.maybeCompleteAuthSession();
+const API = API_URL;
 
-const API =
-  "https://trashmap-api-presamordor-e0csfsedadffd9ey.canadacentral-01.azurewebsites.net/reports"; // [1](https://solerainc-my.sharepoint.com/personal/esteban_salto_solera_com/Documents/Microsoft%20Copilot%20Chat%20Files/App%20%281%29.js)
-
-/** ---------- Bottom Sheet Modal (Drop-off) ---------- */
-function BottomSheet({ visible, onClose, title, children }) {
+/** ---------- Bottom Sheet Modal ---------- */
+function BottomSheet({ visible, onClose, title, children, overlay }) {
   return (
     <Modal
       visible={visible}
       transparent
-      animationType="slide" // slide desde abajo [2](https://reactnative.dev/docs/modal)
+      animationType="slide"
       onRequestClose={onClose}
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
-        {/* evita que el click dentro cierre */}
+        {overlay}
         <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHandle} />
@@ -53,7 +48,6 @@ function BottomSheet({ visible, onClose, title, children }) {
               <Text style={styles.sheetClose}>✕</Text>
             </TouchableOpacity>
           </View>
-
           <View style={styles.sheetContent}>{children}</View>
         </Pressable>
       </Pressable>
@@ -61,76 +55,103 @@ function BottomSheet({ visible, onClose, title, children }) {
   );
 }
 
+function alertError(title, message) {
+  Alert.alert(title, message, [
+    { text: "Copiar", onPress: () => Share.share({ message: `${title}\n${message}` }) },
+    { text: "OK", style: "cancel" },
+  ]);
+}
+
 export default function App() {
   const mapRef = useRef(null);
+  const mapRegionRef = useRef(null);
 
-  // ⚠️ IMPORTANTE: el scheme debe existir en app.json para builds (warning que viste) [3](https://docs.expo.dev/versions/latest/sdk/auth-session/)
-  // Ajusta aquí el scheme para que coincida con tu app.json/app.config.js.
-  const redirectUri = AuthSession.makeRedirectUri({
-    scheme: "presawatch", // [1](https://solerainc-my.sharepoint.com/personal/esteban_salto_solera_com/Documents/Microsoft%20Copilot%20Chat%20Files/App%20%281%29.js)
-  });
+  const normalizeStatus = (value) =>
+    (value ?? "").toString().trim().toLowerCase();
 
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    // Para Expo Go normalmente necesitas expoClientId (Web app con redirect auth.expo.io)
-    // expoClientId: "PEGA_TU_EXPO_CLIENT_ID",
-    androidClientId:
-      "890052014169-4672ttjupn05hhf92oh2l0cb2lnat1v9.apps.googleusercontent.com", // [1](https://solerainc-my.sharepoint.com/personal/esteban_salto_solera_com/Documents/Microsoft%20Copilot%20Chat%20Files/App%20%281%29.js)
-    webClientId:
-      "890052014169-bd5h39u45vk2g1d0a3uu3fcig7ut2er6.apps.googleusercontent.com", // [1](https://solerainc-my.sharepoint.com/personal/esteban_salto_solera_com/Documents/Microsoft%20Copilot%20Chat%20Files/App%20%281%29.js)
-    responseType: "id_token",
-    redirectUri,
-  });
+  const getStatusLabel = (value) => {
+    const status = normalizeStatus(value);
+    if (status === "open" || status === "abierto") return "Abierto";
+    if (status === "closed" || status === "cerrado") return "Cerrado";
+    return value ? String(value) : "Sin estado";
+  };
+
+  const isOpenStatus = (value) => {
+    const status = normalizeStatus(value);
+    return status === "open" || status === "abierto";
+  };
 
   const [user, setUser] = useState(null);
+  const [signingIn, setSigningIn] = useState(false);
 
   const [reports, setReports] = useState([]);
   const [selectedStatus, setSelectedStatus] = useState("all");
   const [loadingReports, setLoadingReports] = useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [minSplashDone, setMinSplashDone] = useState(false);
+  const [navStack, setNavStack] = useState([]);
 
   const [showLogin, setShowLogin] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [selectedReport, setSelectedReport] = useState(null);
 
-  // campos crear reporte
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newStatus, setNewStatus] = useState("open");
 
   const region = useMemo(
     () => ({
-      latitude: 19.4326,
-      longitude: -101.253, // lo dejé como lo tenías; puedes ajustar a -99.1332 si quieres CDMX
+      latitude: 19.6218807,
+      longitude: -101.2552132,
       latitudeDelta: 0.05,
       longitudeDelta: 0.05,
     }),
     []
   );
 
-  // auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser || null);
-      // si loguea, cerramos modal login
       if (currentUser) setShowLogin(false);
     });
     return unsubscribe;
   }, []);
 
-  // Google response → Firebase credential
-  useEffect(() => {
-    if (response?.type === "success") {
-      const idToken = response?.params?.id_token;
-      if (!idToken) {
-        console.log("No id_token received");
+  const signInWithGoogle = async () => {
+    setSigningIn(true);
+    try {
+      await GoogleSignin.hasPlayServices();
+      const result = await GoogleSignin.signIn();
+      // v14: signIn() returns { type, data } instead of throwing on cancel
+      if (result.type !== "success") return;
+      if (!result.data.idToken) {
+        alertError("Error", "Google no devolvió un token. Intenta de nuevo.");
         return;
       }
-      const credential = GoogleAuthProvider.credential(idToken);
-      signInWithCredential(auth, credential).catch((err) => {
-        console.log("Firebase error:", err);
-        Alert.alert("Error", "No se pudo iniciar sesión con Firebase.");
-      });
+      const credential = GoogleAuthProvider.credential(result.data.idToken);
+      await signInWithCredential(auth, credential);
+    } catch (error) {
+      console.error("signInWithGoogle error:", error);
+      if (error.code === statusCodes.IN_PROGRESS) {
+        // already signing in, ignore
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        alertError("Error", "Google Play Services no está disponible.");
+      } else {
+        alertError("Error al iniciar sesión", `${error.code ?? ""}: ${error.message ?? "sin mensaje"}`);
+      }
+    } finally {
+      setSigningIn(false);
     }
-  }, [response]);
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await GoogleSignin.signOut();
+    } catch (_) {}
+    signOut(auth);
+  };
 
   const fetchReports = async () => {
     setLoadingReports(true);
@@ -147,6 +168,11 @@ export default function App() {
 
   useEffect(() => {
     fetchReports();
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setMinSplashDone(true), 800);
+    return () => clearTimeout(timer);
   }, []);
 
   const filteredReports = useMemo(() => {
@@ -171,14 +197,59 @@ export default function App() {
       }));
   }, [reports, selectedStatus]);
 
+  const requestLocationPermission = async () => {
+    const result = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+    );
+    return result === PermissionsAndroid.RESULTS.GRANTED;
+  };
+
+  const getCurrentPosition = () =>
+    new Promise((resolve, reject) =>
+      Geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 15000,
+      })
+    );
+
+  const getDistanceMeters = (a, b) => {
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const R = 6371000;
+    const dLat = toRad(b.latitude - a.latitude);
+    const dLng = toRad(b.longitude - a.longitude);
+    const lat1 = toRad(a.latitude);
+    const lat2 = toRad(b.latitude);
+    const sinDLat = Math.sin(dLat / 2);
+    const sinDLng = Math.sin(dLng / 2);
+    const h =
+      sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
+    return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  };
+
+  const getNearestReport = (from, list, excludeIds) => {
+    if (!from || !list.length) return null;
+    let best = null;
+    let bestDistance = Infinity;
+    for (const item of list) {
+      if (item.id === from.id) continue;
+      if (excludeIds?.has(item.id)) continue;
+      const d = getDistanceMeters(from, item);
+      if (d < bestDistance) {
+        best = item;
+        bestDistance = d;
+      }
+    }
+    return best;
+  };
+
   const goToMyLocation = async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
+      const hasPermission = await requestLocationPermission();
+      if (!hasPermission) {
         Alert.alert("Permiso requerido", "Activa permisos de ubicación.");
         return;
       }
-      const location = await Location.getCurrentPositionAsync({});
+      const location = await getCurrentPosition();
       mapRef.current?.animateToRegion(
         {
           latitude: location.coords.latitude,
@@ -191,6 +262,78 @@ export default function App() {
     } catch (e) {
       Alert.alert("Error", "No se pudo obtener tu ubicación.");
     }
+  };
+
+  const focusReport = (report) => {
+    if (!report) return;
+    const currentRegion = mapRegionRef.current;
+    mapRef.current?.animateToRegion(
+      {
+        latitude: report.latitude,
+        longitude: report.longitude,
+        latitudeDelta: currentRegion?.latitudeDelta ?? 0.02,
+        longitudeDelta: currentRegion?.longitudeDelta ?? 0.02,
+      },
+      600
+    );
+  };
+
+  const selectReport = (report) => {
+    if (!report) return;
+    setSelectedReport(report);
+    setShowReport(true);
+  };
+
+  const openReport = (report) => {
+    if (!report) return;
+    setNavStack([report.id]);
+    selectReport(report);
+  };
+
+  const closeReport = () => {
+    setShowReport(false);
+    setSelectedReport(null);
+    setNavStack([]);
+  };
+
+  useEffect(() => {
+    setNavStack([]);
+  }, [selectedStatus]);
+
+  useEffect(() => {
+    if (!selectedReport) return;
+    const exists = filteredReports.some((r) => r.id === selectedReport.id);
+    if (!exists) closeReport();
+  }, [filteredReports, selectedReport]);
+
+  useEffect(() => {
+    if (!selectedReport || !mapLoaded) return;
+    focusReport(selectedReport);
+  }, [selectedReport, mapLoaded]);
+
+  useEffect(() => {
+    if (selectedReport && navStack.length === 0) {
+      setNavStack([selectedReport.id]);
+    }
+  }, [selectedReport, navStack.length]);
+
+  const navigatePrev = () => {
+    if (navStack.length <= 1) return;
+    const nextStack = navStack.slice(0, -1);
+    const prevId = nextStack[nextStack.length - 1];
+    const prevReport = filteredReports.find((r) => r.id === prevId);
+    setNavStack(nextStack);
+    if (prevReport) {
+      selectReport(prevReport);
+    } else {
+      closeReport();
+    }
+  };
+
+  const navigateNext = (nextReport) => {
+    if (!nextReport) return;
+    setNavStack((prev) => [...prev, nextReport.id]);
+    selectReport(nextReport);
   };
 
   const openCreateModal = () => {
@@ -209,13 +352,13 @@ export default function App() {
 
     setCreating(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
+      const hasPermission = await requestLocationPermission();
+      if (!hasPermission) {
         Alert.alert("Permiso requerido", "Activa permisos de ubicación.");
         return;
       }
 
-      const location = await Location.getCurrentPositionAsync({});
+      const location = await getCurrentPosition();
       const payload = {
         title: newTitle.trim(),
         description: newDesc.trim(),
@@ -226,13 +369,11 @@ export default function App() {
 
       await axios.post(API, payload);
 
-      // reset form
       setNewTitle("");
       setNewDesc("");
       setNewStatus("open");
       setShowCreate(false);
 
-      // refresh list/markers
       fetchReports();
       Alert.alert("Listo", "Reporte creado correctamente.");
     } catch (e) {
@@ -243,45 +384,107 @@ export default function App() {
     }
   };
 
+  const showNavArrows = selectedStatus === "all" || selectedStatus === "open";
+  const nextReport = useMemo(() => {
+    if (!selectedReport) return null;
+    const exclude = new Set(navStack);
+    exclude.add(selectedReport.id);
+    return getNearestReport(selectedReport, filteredReports, exclude);
+  }, [selectedReport, filteredReports, navStack]);
+  const canNavPrev = navStack.length > 1;
+  const canNavNext = !!selectedReport && !!nextReport;
+
+  const reportNumber = useMemo(() => {
+    if (!selectedReport) return null;
+    const inFiltered = filteredReports.findIndex(
+      (r) => r.id === selectedReport.id
+    );
+    if (inFiltered >= 0) return inFiltered + 1;
+    const inAll = reports.findIndex((r) => String(r.id) === selectedReport.id);
+    return inAll >= 0 ? inAll + 1 : null;
+  }, [selectedReport, filteredReports, reports]);
+
+  const renderNavOverlay = () => {
+    if (!showNavArrows) return null;
+    return (
+      <View style={styles.navOverlay} pointerEvents="box-none">
+        {!!selectedReport && (
+          <TouchableOpacity
+            style={[
+              styles.navEdgeBtn,
+              styles.navEdgeLeft,
+              !canNavPrev && styles.navEdgeDisabled,
+            ]}
+            onPress={navigatePrev}
+            disabled={!canNavPrev}
+          >
+            <Text style={styles.navEdgeText}>‹</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          style={[
+            styles.navEdgeBtn,
+            styles.navEdgeRight,
+            !canNavNext && styles.navEdgeDisabled,
+          ]}
+          onPress={() => navigateNext(nextReport)}
+          disabled={!canNavNext}
+        >
+          <Text style={styles.navEdgeText}>›</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
   return (
-    <View style={{ flex: 1 }}>
-      {/* MAPA COMO FONDO (fix clave) */}
+    <KeyboardAvoidingView
+      style={styles.appRoot}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
+    >
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
         initialRegion={region}
         showsUserLocation
+        showsMyLocationButton={false}
+        zoomEnabled
+        scrollEnabled
+        onMapLoaded={() => setMapLoaded(true)}
+        onRegionChangeComplete={(nextRegion) => {
+          mapRegionRef.current = nextRegion;
+        }}
       >
         {filteredReports.map((r) => (
           <Marker
             key={r.id}
             coordinate={{ latitude: r.latitude, longitude: r.longitude }}
+            pinColor={isOpenStatus(r.status) ? "#EF4444" : "#6B7280"}
+            onPress={() => openReport(r)}
           >
-            <Callout>
-              <View style={{ maxWidth: 200 }}>
-                <Text style={{ fontWeight: "bold" }}>{r.title}</Text>
-                <Text>{r.status}</Text>
-              </View>
-            </Callout>
           </Marker>
         ))}
       </MapView>
 
-      {/* OVERLAYS */}
+      {(!mapLoaded || !minSplashDone) && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator color="white" size="small" />
+          <Text style={styles.loadingText}>Cargando...</Text>
+        </View>
+      )}
+
       <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
-        {/* Caja usuario */}
         {user && (
           <View style={styles.userBox} pointerEvents="auto">
             <Text style={{ fontSize: 12 }} numberOfLines={1}>
               {user.displayName || user.email || "Usuario"}
             </Text>
-            <TouchableOpacity onPress={() => signOut(auth)}>
+            <TouchableOpacity onPress={handleSignOut}>
               <Text style={{ color: "red", fontSize: 10 }}>Cerrar sesión</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Barra de filtros simple */}
         <View style={styles.filterRow} pointerEvents="auto">
           {["all", "open", "closed"].map((s) => (
             <TouchableOpacity
@@ -298,37 +501,35 @@ export default function App() {
                   selectedStatus === s && styles.filterTextActive,
                 ]}
               >
-                {s.toUpperCase()}
+                {s === "all" ? "TODOS" : s === "open" ? "ABIERTOS" : "CERRADOS"}
               </Text>
             </TouchableOpacity>
           ))}
 
           <TouchableOpacity style={styles.refreshBtn} onPress={fetchReports}>
-            <Text style={{ color: "white" }}>
-              {loadingReports ? "..." : "↻"}
+            <Text style={styles.refreshText}>
+              {loadingReports ? "..." : "Refrescar"}
             </Text>
           </TouchableOpacity>
         </View>
 
-        {/* FAB Ubicación */}
+        {!showReport && renderNavOverlay()}
+
         <TouchableOpacity style={styles.locBtn} onPress={goToMyLocation}>
           <Text style={{ color: "white", fontSize: 18 }}>📍</Text>
         </TouchableOpacity>
 
-        {/* FAB Crear reporte */}
         <TouchableOpacity style={styles.addBtn} onPress={openCreateModal}>
           <Text style={{ color: "white", fontSize: 22 }}>＋</Text>
         </TouchableOpacity>
 
-        {/* FAB Login (si no hay user) */}
         {!user && (
           <TouchableOpacity style={styles.loginFab} onPress={() => setShowLogin(true)}>
-            <Text style={{ color: "white" }}>Login</Text>
+            <Text style={{ color: "white" }}>Ingresar</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {/* MODAL LOGIN (drop-off) */}
       <BottomSheet
         visible={showLogin}
         onClose={() => setShowLogin(false)}
@@ -337,21 +538,19 @@ export default function App() {
         <Text style={styles.sheetHint}>
           Inicia sesión con Google para crear reportes.
         </Text>
-
         <TouchableOpacity
-          disabled={!request}
-          style={[styles.primaryBtn, !request && { opacity: 0.6 }]}
-          onPress={() => promptAsync()}
+          style={[styles.primaryBtn, signingIn && { opacity: 0.6 }]}
+          onPress={signInWithGoogle}
+          disabled={signingIn}
         >
-          <Text style={styles.primaryBtnText}>Continuar con Google</Text>
+          {signingIn ? (
+            <ActivityIndicator color="white" />
+          ) : (
+            <Text style={styles.primaryBtnText}>Continuar con Google</Text>
+          )}
         </TouchableOpacity>
-
-        <Text style={styles.sheetSmall}>
-          Tip: para producción, asegúrate de configurar el scheme en app.json. [3](https://docs.expo.dev/versions/latest/sdk/auth-session/)
-        </Text>
       </BottomSheet>
 
-      {/* MODAL CREAR REPORTE (drop-off) */}
       <BottomSheet
         visible={showCreate}
         onClose={() => setShowCreate(false)}
@@ -391,7 +590,7 @@ export default function App() {
                     newStatus === s && styles.statusPillTextActive,
                   ]}
                 >
-                  {s.toUpperCase()}
+                  {getStatusLabel(s).toUpperCase()}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -410,15 +609,54 @@ export default function App() {
           </TouchableOpacity>
         </KeyboardAvoidingView>
       </BottomSheet>
-    </View>
+
+      <BottomSheet
+        visible={showReport}
+        onClose={closeReport}
+        title="Reporte"
+        overlay={renderNavOverlay()}
+      >
+        {selectedReport ? (
+          <>
+            <Text style={styles.reportTitle}>
+              {selectedReport.title?.trim() ||
+                (reportNumber ? `Reporte No. ${reportNumber}` : "Reporte")}
+            </Text>
+            {reportNumber && selectedReport.title?.trim() && (
+              <Text style={styles.reportNumber}>Reporte No. {reportNumber}</Text>
+            )}
+            {selectedReport.description ? (
+              <Text style={styles.reportDesc}>{selectedReport.description}</Text>
+            ) : (
+              <Text style={styles.reportDescMuted}>Sin descripción.</Text>
+            )}
+            <View style={styles.reportMetaRow}>
+              <Text style={styles.reportMetaLabel}>Estado</Text>
+              <Text
+                style={[
+                  styles.reportStatus,
+                  isOpenStatus(selectedReport.status)
+                    ? styles.reportStatusOpen
+                    : styles.reportStatusClosed,
+                ]}
+              >
+                {getStatusLabel(selectedReport.status)}
+              </Text>
+            </View>
+          </>
+        ) : (
+          <Text style={styles.reportDescMuted}>Reporte no disponible.</Text>
+        )}
+      </BottomSheet>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   userBox: {
     position: "absolute",
-    top: 40,
-    right: 20,
+    top: 86,
+    right: 14,
     zIndex: 50,
     backgroundColor: "white",
     padding: 8,
@@ -463,13 +701,58 @@ const styles = StyleSheet.create({
 
   refreshBtn: {
     marginLeft: "auto",
-    backgroundColor: "#111827",
-    width: 38,
-    height: 38,
-    borderRadius: 20,
+    backgroundColor: "#4285F4",
+    paddingHorizontal: 12,
+    minWidth: 92,
+    height: 34,
+    borderRadius: 18,
     justifyContent: "center",
     alignItems: "center",
     elevation: 5,
+  },
+
+  refreshText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+
+  navOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+
+  navEdgeBtn: {
+    position: "absolute",
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    top: "50%",
+    marginTop: -19,
+    backgroundColor: "rgba(66,133,244,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(66,133,244,0.35)",
+  },
+
+  navEdgeLeft: {
+    left: 10,
+  },
+
+  navEdgeRight: {
+    right: 10,
+  },
+
+  navEdgeText: {
+    color: "#4285F4",
+    fontWeight: "700",
+    fontSize: 22,
+    lineHeight: 22,
+  },
+
+  navEdgeDisabled: {
+    opacity: 0.35,
   },
 
   locBtn: {
@@ -507,6 +790,26 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 26,
     elevation: 6,
+  },
+
+  appRoot: {
+    flex: 1,
+    backgroundColor: "#4285F4",
+  },
+
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#4285F4",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    zIndex: 100,
+  },
+
+  loadingText: {
+    color: "white",
+    fontWeight: "700",
+    fontSize: 16,
   },
 
   backdrop: {
@@ -560,12 +863,6 @@ const styles = StyleSheet.create({
     color: "#374151",
   },
 
-  sheetSmall: {
-    color: "#6B7280",
-    fontSize: 12,
-    marginTop: 6,
-  },
-
   primaryBtn: {
     backgroundColor: "#111827",
     paddingVertical: 12,
@@ -615,5 +912,54 @@ const styles = StyleSheet.create({
 
   statusPillTextActive: {
     color: "white",
+  },
+
+  reportTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111827",
+  },
+
+  reportNumber: {
+    fontSize: 12,
+    color: "#6B7280",
+    fontWeight: "600",
+  },
+
+  reportDesc: {
+    fontSize: 13,
+    color: "#374151",
+  },
+
+  reportDescMuted: {
+    fontSize: 13,
+    color: "#6B7280",
+    fontStyle: "italic",
+  },
+
+  reportMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 6,
+  },
+
+  reportMetaLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#111827",
+  },
+
+  reportStatus: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  reportStatusOpen: {
+    color: "#EF4444",
+  },
+
+  reportStatusClosed: {
+    color: "#6B7280",
   },
 });
