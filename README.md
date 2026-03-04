@@ -20,7 +20,7 @@ nvm use --lts
 ```
 1.1 Powershell (windows)
 
-```npm install react-native-image-picker
+npm install react-native-image-picker
 ```
 
 2. Android SDK
@@ -213,8 +213,7 @@ nvm use --lts
 ```
 
 1.1 Powershell (windows)
-
-```npm install react-native-image-picker
+npm install react-native-image-picker
 ```
 
 ```
