@@ -18,9 +18,9 @@ curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 nvm install --lts
 nvm use --lts
 ```
-1.1
-Powershell
-npm install react-native-image-picker
+1.1 Powershell (windows)
+
+```npm install react-native-image-picker
 ```
 
 2. Android SDK
@@ -212,9 +212,10 @@ nvm install --lts
 nvm use --lts
 ```
 
-1.1
-Powershell
-npm install react-native-image-picker
+1.1 Powershell (windows)
+
+```npm install react-native-image-picker
+```
 
 ```
 
