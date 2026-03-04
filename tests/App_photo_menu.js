@@ -194,8 +194,11 @@ export default function App() {
   const [photoInProgress, setPhotoInProgress] = useState(null);
   const [photoClosed, setPhotoClosed] = useState(null);
   const [updatingReport, setUpdatingReport] = useState(false);
-  // Listas dentro del userBox (sin modal): open / in_progress / closed
-  const [expandedUserList, setExpandedUserList] = useState(null);
+
+  // Dropdown: Mis reportes abiertos (anclado a la barra)
+  const [showMyOpenMenu, setShowMyOpenMenu] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0, w: 0, h: 0 });
+  const myOpenBtnWrapRef = useRef(null);
 
   const region = useMemo(
     () => ({
@@ -325,68 +328,6 @@ export default function App() {
       }))
       .sort((a, b) => Number(b.id) - Number(a.id));
   }, [reports, user]);
-
-  const myInProgressReports = useMemo(() => {
-    const uid = user?.uid;
-    const email = (user?.email || "").toLowerCase().trim();
-
-    return (Array.isArray(reports) ? reports : [])
-      .filter((r) => {
-        const rUid = r.createdBy || r.userId || r.ownerId || null;
-        const rEmail = (r.createdByEmail || r.email || "").toLowerCase().trim();
-        if (uid && rUid) return String(rUid) === String(uid);
-        if (email && rEmail) return rEmail === email;
-        return false;
-      })
-      .filter((r) => isInProgressStatus(r.status))
-      .filter(
-        (r) =>
-          r.latitude != null &&
-          r.longitude != null &&
-          !isNaN(Number(r.latitude)) &&
-          !isNaN(Number(r.longitude))
-      )
-      .map((r) => ({
-        ...r,
-        latitude: Number(r.latitude),
-        longitude: Number(r.longitude),
-        id: String(r.id),
-      }))
-      .sort((a, b) => Number(b.id) - Number(a.id));
-  }, [reports, user]);
-
-  const myClosedReports = useMemo(() => {
-    const uid = user?.uid;
-    const email = (user?.email || "").toLowerCase().trim();
-
-    return (Array.isArray(reports) ? reports : [])
-      .filter((r) => {
-        const rUid = r.createdBy || r.userId || r.ownerId || null;
-        const rEmail = (r.createdByEmail || r.email || "").toLowerCase().trim();
-        if (uid && rUid) return String(rUid) === String(uid);
-        if (email && rEmail) return rEmail === email;
-        return false;
-      })
-      .filter((r) => {
-        const s = normalizeStatus(r.status);
-        return s === "closed" || s === "cerrado";
-      })
-      .filter(
-        (r) =>
-          r.latitude != null &&
-          r.longitude != null &&
-          !isNaN(Number(r.latitude)) &&
-          !isNaN(Number(r.longitude))
-      )
-      .map((r) => ({
-        ...r,
-        latitude: Number(r.latitude),
-        longitude: Number(r.longitude),
-        id: String(r.id),
-      }))
-      .sort((a, b) => Number(b.id) - Number(a.id));
-  }, [reports, user]);
-
 
 
   const requestLocationPermission = async () => {
@@ -540,8 +481,12 @@ export default function App() {
     setShowCreate(true);
   };
 
-  const toggleUserList = (mode) => {
-    setExpandedUserList((prev) => (prev === mode ? null : mode));
+  const openMyOpenMenu = () => {
+    if (!myOpenBtnWrapRef.current) return;
+    myOpenBtnWrapRef.current.measureInWindow((x, y, w, h) => {
+      setMenuAnchor({ x, y, w, h });
+      setShowMyOpenMenu(true);
+    });
   };
 
   // ---------- Fotos (base64) ----------
@@ -620,7 +565,7 @@ export default function App() {
         description: newDesc.trim(),
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
-        status: "open",
+        status: newStatus,
 
       // dueño del reporte (para filtrar 'mis reportes')
       createdBy: user?.uid || null,
@@ -640,6 +585,7 @@ export default function App() {
 
       setNewTitle("");
       setNewDesc("");
+      setNewStatus("open");
       setPhotoOpen(null);
       setPhotoInProgress(null);
       setPhotoClosed(null);
@@ -647,12 +593,8 @@ export default function App() {
       fetchReports();
       Alert.alert("Listo", "Reporte creado correctamente.");
     } catch (e) {
-      const status = e?.response?.status;
-      const data = e?.response?.data;
-      const msg = e?.message;
-
-      console.log("updateReportStage error:", { status, data, msg });
-      Alert.alert( "Error al actualizar",`${status ? `HTTP ${status}\n` : ""}${data ? JSON.stringify(data) : msg || "Sin detalle"}` );
+      console.log(e);
+      Alert.alert("Error", "No se pudo crear el reporte.");
     } finally {
       setCreating(false);
     }
@@ -668,7 +610,7 @@ export default function App() {
 
     setUpdatingReport(true);
     try {
-      await axios.put(`${API}/${reportId}`, {
+      await axios.patch(`${API}/${reportId}`, {
         status: nextStatus,
         photoStage: nextStatus, // "in_progress" o "closed"
         photo: { base64: stagePhoto.base64, type: stagePhoto.type, name: stagePhoto.name },
@@ -791,114 +733,15 @@ export default function App() {
 
       <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
         {user && (
-        <View style={styles.userBox} pointerEvents="auto">
-          <Text style={{ fontSize: 12 }} numberOfLines={1}>
-            {user.displayName || user.email || "Usuario"}
-          </Text>
-
-          <View style={styles.userBoxMenu}>
-            {/* Abiertos */}
-            <TouchableOpacity style={[styles.userBoxPill, styles.pillOpen]} onPress={() => toggleUserList("open")}>
-              <Text style={styles.userBoxPillText} numberOfLines={1}>Abiertos</Text>
-              <View style={[styles.countBadge, styles.badgeOpen]}>
-                <Text style={styles.countBadgeText}>{myOpenReports.length}</Text>
-              </View>
+          <View style={styles.userBox} pointerEvents="auto">
+            <Text style={{ fontSize: 12 }} numberOfLines={1}>
+              {user.displayName || user.email || "Usuario"}
+            </Text>
+            <TouchableOpacity onPress={handleSignOut}>
+              <Text style={{ color: "red", fontSize: 10 }}>Cerrar sesión</Text>
             </TouchableOpacity>
-            {expandedUserList === "open" && (
-              <View style={styles.inlineList}>
-                <FlatList
-                  data={myOpenReports}
-                  keyExtractor={(it) => it.id}
-                  nestedScrollEnabled
-                  ListEmptyComponent={<Text style={styles.inlineEmpty}>Sin reportes.</Text>}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={styles.inlineItem}
-                      onPress={() => {
-                        setExpandedUserList(null);
-                        openReport(item);
-                      }}
-                    >
-                      <Text style={styles.inlineItemTitle} numberOfLines={1}>
-                        {item.title?.trim() || `Reporte ${item.id}`}
-                      </Text>
-                      <Text style={styles.inlineItemMeta} numberOfLines={1}>ID: {item.id}</Text>
-                    </TouchableOpacity>
-                  )}
-                />
-              </View>
-            )}
-
-            {/* En progreso */}
-            <TouchableOpacity style={[styles.userBoxPill, styles.pillProgress]} onPress={() => toggleUserList("in_progress")}>
-              <Text style={styles.userBoxPillText} numberOfLines={1}>En progreso</Text>
-              <View style={[styles.countBadge, styles.badgeProgress]}>
-                <Text style={styles.countBadgeText}>{myInProgressReports.length}</Text>
-              </View>
-            </TouchableOpacity>
-            {expandedUserList === "in_progress" && (
-              <View style={styles.inlineList}>
-                <FlatList
-                  data={myInProgressReports}
-                  keyExtractor={(it) => it.id}
-                  nestedScrollEnabled
-                  ListEmptyComponent={<Text style={styles.inlineEmpty}>Sin reportes.</Text>}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={styles.inlineItem}
-                      onPress={() => {
-                        setExpandedUserList(null);
-                        openReport(item);
-                      }}
-                    >
-                      <Text style={styles.inlineItemTitle} numberOfLines={1}>
-                        {item.title?.trim() || `Reporte ${item.id}`}
-                      </Text>
-                      <Text style={styles.inlineItemMeta} numberOfLines={1}>ID: {item.id}</Text>
-                    </TouchableOpacity>
-                  )}
-                />
-              </View>
-            )}
-
-            {/* Cerrados */}
-            <TouchableOpacity style={[styles.userBoxPill, styles.pillClosed]} onPress={() => toggleUserList("closed")}>
-              <Text style={styles.userBoxPillText} numberOfLines={1}>Cerrados</Text>
-              <View style={[styles.countBadge, styles.badgeClosed]}>
-                <Text style={styles.countBadgeText}>{myClosedReports.length}</Text>
-              </View>
-            </TouchableOpacity>
-            {expandedUserList === "closed" && (
-              <View style={styles.inlineList}>
-                <FlatList
-                  data={myClosedReports}
-                  keyExtractor={(it) => it.id}
-                  nestedScrollEnabled
-                  ListEmptyComponent={<Text style={styles.inlineEmpty}>Sin reportes.</Text>}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={styles.inlineItem}
-                      onPress={() => {
-                        setExpandedUserList(null);
-                        openReport(item);
-                      }}
-                    >
-                      <Text style={styles.inlineItemTitle} numberOfLines={1}>
-                        {item.title?.trim() || `Reporte ${item.id}`}
-                      </Text>
-                      <Text style={styles.inlineItemMeta} numberOfLines={1}>ID: {item.id}</Text>
-                    </TouchableOpacity>
-                  )}
-                />
-              </View>
-            )}
           </View>
-
-          <TouchableOpacity onPress={handleSignOut}>
-            <Text style={{ color: "red", fontSize: 10 }}>Cerrar sesión</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        )}
 
         <View style={styles.filterRow} pointerEvents="auto">
           {["all", "open", "in_progress", "closed"].map((s) => (
@@ -921,7 +764,17 @@ export default function App() {
             </TouchableOpacity>
           ))}
 
-          <TouchableOpacity style={styles.refreshBtn} onPress={fetchReports}>
+          {user && (
+          <View ref={myOpenBtnWrapRef} collapsable={false}>
+            <TouchableOpacity style={styles.myOpenBtn} onPress={openMyOpenMenu}>
+              <Text style={styles.myOpenBtnText}>
+                MIS ABIERTOS ▼ {myOpenReports.length ? `(${myOpenReports.length})` : ""}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <TouchableOpacity style={styles.refreshBtn} onPress={fetchReports}>
             <Text style={styles.refreshText}>{loadingReports ? "..." : "Refrescar"}</Text>
           </TouchableOpacity>
         </View>
@@ -975,9 +828,20 @@ export default function App() {
           />
 
           <Text style={styles.label}>Status</Text>
-          <View style={styles.fixedStatusRow}>
-            <Text style={styles.fixedStatusBadge}>ABIERTO</Text>
-            <Text style={styles.fixedStatusHint}>Los reportes nuevos siempre se crean en “Abierto”.</Text>
+          <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
+            {["open", "in_progress", "closed"].map((s) => (
+              <TouchableOpacity
+                key={s}
+                style={[styles.statusPill, newStatus === s && styles.statusPillActive]}
+                onPress={() => setNewStatus(s)}
+              >
+                <Text
+                  style={[styles.statusPillText, newStatus === s && styles.statusPillTextActive]}
+                >
+                  {getStatusLabel(s).toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
           <Text style={styles.label}>Foto inicial (Abierto)</Text>
@@ -1186,6 +1050,15 @@ export default function App() {
           <Text style={styles.reportDescMuted}>Reporte no disponible.</Text>
         )}
       </BottomSheet>
+    
+
+      <DropdownMenu
+        visible={showMyOpenMenu}
+        onClose={() => setShowMyOpenMenu(false)}
+        anchor={menuAnchor}
+        items={myOpenReports}
+        onSelect={(report) => openReport(report)}
+      />
 </KeyboardAvoidingView>
   );
 }
@@ -1200,22 +1073,22 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 12,
     elevation: 6,
-    maxWidth: 240,
+    maxWidth: 180,
   },
   filterRow: {
     position: "absolute",
     top: 40,
-    left: 10,
-    right: 10,
+    left: 14,
+    right: 14,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 10,
   },
   filterChip: {
     backgroundColor: "rgba(255,255,255,0.92)",
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.08)",
   },
@@ -1224,9 +1097,8 @@ const styles = StyleSheet.create({
     borderColor: "#0E7490",
   },
   filterText: {
-    fontSize: 10,
+    fontSize: 12,
     color: "#111",
-    fontWeight: "700",
   },
   filterTextActive: {
     color: "white",
@@ -1492,90 +1364,4 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     marginTop: 8,
   },
-
-  // Menú y listas dentro del userBox (dropdown inline por opción)
-  userBoxMenu: {
-    marginTop: 8,
-    gap: 6,
-  },
-  userBoxPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 7,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  userBoxPillText: {
-    color: "#111827",
-    fontSize: 11,
-    fontWeight: "900",
-    flexShrink: 1,
-    paddingRight: 8,
-  },
-  countBadge: {
-    minWidth: 22,
-    paddingHorizontal: 6,
-    height: 18,
-    borderRadius: 9,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  countBadgeText: {
-    color: "white",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  pillOpen: {
-    backgroundColor: "rgba(239,68,68,0.08)",
-    borderColor: "rgba(239,68,68,0.20)",
-  },
-  badgeOpen: { backgroundColor: "#EF4444" },
-  pillProgress: {
-    backgroundColor: "rgba(245,158,11,0.10)",
-    borderColor: "rgba(245,158,11,0.22)",
-  },
-  badgeProgress: { backgroundColor: "#F59E0B" },
-  pillClosed: {
-    backgroundColor: "rgba(107,114,128,0.10)",
-    borderColor: "rgba(107,114,128,0.22)",
-  },
-  badgeClosed: { backgroundColor: "#6B7280" },
-
-  inlineList: {
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.08)",
-    backgroundColor: "rgba(255,255,255,0.95)",
-    borderRadius: 12,
-    padding: 6,
-    maxHeight: 160,
-  },
-  inlineItem: {
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    backgroundColor: "#F9FAFB",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    marginBottom: 6,
-  },
-  inlineItemTitle: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: "#111827",
-  },
-  inlineItemMeta: {
-    marginTop: 2,
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#6B7280",
-  },
-  inlineEmpty: {
-    fontSize: 11,
-    color: "#6B7280",
-    paddingVertical: 8,
-    textAlign: "center",
-  },
-
 });

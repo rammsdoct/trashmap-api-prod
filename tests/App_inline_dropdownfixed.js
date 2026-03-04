@@ -620,7 +620,7 @@ export default function App() {
         description: newDesc.trim(),
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
-        status: "open",
+        status: newStatus,
 
       // dueño del reporte (para filtrar 'mis reportes')
       createdBy: user?.uid || null,
@@ -640,6 +640,7 @@ export default function App() {
 
       setNewTitle("");
       setNewDesc("");
+      setNewStatus("open");
       setPhotoOpen(null);
       setPhotoInProgress(null);
       setPhotoClosed(null);
@@ -647,12 +648,8 @@ export default function App() {
       fetchReports();
       Alert.alert("Listo", "Reporte creado correctamente.");
     } catch (e) {
-      const status = e?.response?.status;
-      const data = e?.response?.data;
-      const msg = e?.message;
-
-      console.log("updateReportStage error:", { status, data, msg });
-      Alert.alert( "Error al actualizar",`${status ? `HTTP ${status}\n` : ""}${data ? JSON.stringify(data) : msg || "Sin detalle"}` );
+      console.log(e);
+      Alert.alert("Error", "No se pudo crear el reporte.");
     } finally {
       setCreating(false);
     }
@@ -668,7 +665,7 @@ export default function App() {
 
     setUpdatingReport(true);
     try {
-      await axios.put(`${API}/${reportId}`, {
+      await axios.patch(`${API}/${reportId}`, {
         status: nextStatus,
         photoStage: nextStatus, // "in_progress" o "closed"
         photo: { base64: stagePhoto.base64, type: stagePhoto.type, name: stagePhoto.name },
@@ -975,9 +972,20 @@ export default function App() {
           />
 
           <Text style={styles.label}>Status</Text>
-          <View style={styles.fixedStatusRow}>
-            <Text style={styles.fixedStatusBadge}>ABIERTO</Text>
-            <Text style={styles.fixedStatusHint}>Los reportes nuevos siempre se crean en “Abierto”.</Text>
+          <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
+            {["open", "in_progress", "closed"].map((s) => (
+              <TouchableOpacity
+                key={s}
+                style={[styles.statusPill, newStatus === s && styles.statusPillActive]}
+                onPress={() => setNewStatus(s)}
+              >
+                <Text
+                  style={[styles.statusPillText, newStatus === s && styles.statusPillTextActive]}
+                >
+                  {getStatusLabel(s).toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
           <Text style={styles.label}>Foto inicial (Abierto)</Text>
@@ -1205,17 +1213,17 @@ const styles = StyleSheet.create({
   filterRow: {
     position: "absolute",
     top: 40,
-    left: 10,
-    right: 10,
+    left: 14,
+    right: 14,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 10,
   },
   filterChip: {
     backgroundColor: "rgba(255,255,255,0.92)",
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.08)",
   },
@@ -1224,9 +1232,8 @@ const styles = StyleSheet.create({
     borderColor: "#0E7490",
   },
   filterText: {
-    fontSize: 10,
+    fontSize: 12,
     color: "#111",
-    fontWeight: "700",
   },
   filterTextActive: {
     color: "white",
