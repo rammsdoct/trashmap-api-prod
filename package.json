@@ -7,9 +7,12 @@
     "android": "react-native run-android"
   },
   "dependencies": {
+    "@azure/cosmos": "^4.9.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-google-signin/google-signin": "^14.0.0",
     "axios": "^1.13.5",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "firebase": "^12.9.0",
     "react": "19.1.0",
     "react-native": "0.81.5",

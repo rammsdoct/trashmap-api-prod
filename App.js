@@ -36,6 +36,8 @@ GoogleSignin.configure({
 });
 
 const API = API_URL;
+// Base del API para endpoints adicionales (p.ej. /leaderboard)
+const API_BASE = String(API_URL).replace(/\/reports\/?$/, "");
 
 /** ---------- Bottom Sheet Modal ---------- */
 function BottomSheet({ visible, onClose, title, children, overlay }) {
@@ -81,6 +83,7 @@ function DropdownMenu({ visible, onClose, anchor, items, onSelect }) {
   if (left < 10) left = 10;
 
   
+  const MIN_TOP = 92;
   if (top < MIN_TOP) top = MIN_TOP;
 
   // ✅ Si no hay espacio abajo, súbelo arriba del botón
@@ -172,6 +175,24 @@ export default function App() {
     return "#6B7280"; // gris
   };
 
+  // Rangos por puntos
+  const getRankLabel = (points) => {
+    const p = Number(points) || 0;
+    if (p >= 500) return "Embajador verde";
+    if (p >= 100) return "Emisario verde";
+    if (p >= 10) return "Soldado verde";
+    return "Sin rango";
+  };
+
+  const getRankColor = (points) => {
+    const p = Number(points) || 0;
+    if (p >= 500) return "#16A34A";
+    if (p >= 100) return "#22C55E";
+    if (p >= 10) return "#4ADE80";
+    return "#9CA3AF";
+  };
+
+
   const [user, setUser] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
   const [reports, setReports] = useState([]);
@@ -196,6 +217,12 @@ export default function App() {
   const [updatingReport, setUpdatingReport] = useState(false);
   // Listas dentro del userBox (sin modal): open / in_progress / closed
   const [expandedUserList, setExpandedUserList] = useState(null);
+  // Scoreboard (público)
+  const [showScoreboard, setShowScoreboard] = useState(false);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
+  const [leaderboardSource, setLeaderboardSource] = useState("api");
+
 
   const region = useMemo(
     () => ({
@@ -265,6 +292,37 @@ export default function App() {
     }
   };
 
+  const fetchLeaderboard = async () => {
+    setLoadingLeaderboard(true);
+    try {
+      // Endpoint público: GET /leaderboard
+      const res = await axios.get(`${API_BASE}/leaderboard`);
+      setLeaderboard(Array.isArray(res.data) ? res.data : []);
+    setLeaderboardSource("api");
+    } catch (e) {
+    // Si el backend aún no tiene /leaderboard, usamos un fallback local
+    console.log("leaderboard error:", e?.response?.status, e?.response?.data, e?.message);
+
+    if (localLeaderboard.length) {
+      setLeaderboard(localLeaderboard);
+      setLeaderboardSource("local");
+      // No mostramos alerta para evitar ruido (estamos mostrando datos)
+    } else {
+      setLeaderboard([]);
+      setLeaderboardSource("api");
+      Alert.alert("Error", "No se pudo cargar el scoreboard.");
+    }
+  } finally {
+      setLoadingLeaderboard(false);
+    }
+  };
+
+  const openScoreboard = async () => {
+    setShowScoreboard(true);
+    await fetchLeaderboard();
+  };
+
+
   useEffect(() => {
     fetchReports();
   }, []);
@@ -295,6 +353,29 @@ export default function App() {
         id: String(r.id),
       }));
   }, [reports, selectedStatus]);
+
+  // Scoreboard local (fallback): se calcula a partir de reportes cerrados descargados
+  const localLeaderboard = useMemo(() => {
+    const byUser = new Map();
+    for (const r of Array.isArray(reports) ? reports : []) {
+      const s = normalizeStatus(r.status);
+      if (s !== "closed" && s !== "cerrado") continue;
+      const userId = r.createdBy || r.userId || r.ownerId;
+      if (!userId) continue;
+      const name = r.createdByName || r.displayName || r.createdByEmail || "Usuario";
+      const current =
+        byUser.get(String(userId)) ||
+        { userId: String(userId), displayName: name, closedCount: 0, points: 0 };
+      current.closedCount += 1;
+      current.points = current.closedCount * 10;
+      if (name && name !== "Usuario") current.displayName = name;
+      byUser.set(String(userId), current);
+    }
+    return Array.from(byUser.values()).sort(
+      (a, b) => (Number(b.points) || 0) - (Number(a.points) || 0)
+    );
+  }, [reports]);
+
 
   const myOpenReports = useMemo(() => {
     const uid = user?.uid;
@@ -386,6 +467,11 @@ export default function App() {
       }))
       .sort((a, b) => Number(b.id) - Number(a.id));
   }, [reports, user]);
+
+  // Puntos: 10 por ticket cerrado (fallback local)
+  const myPoints = useMemo(() => (myClosedReports.length || 0) * 10, [myClosedReports.length]);
+  const myRank = useMemo(() => getRankLabel(myPoints), [myPoints]);
+
 
 
 
@@ -921,6 +1007,9 @@ export default function App() {
             </TouchableOpacity>
           ))}
 
+          <TouchableOpacity style={styles.scoreBtn} onPress={openScoreboard}>
+            <Text style={styles.scoreBtnText}>🏆</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.refreshBtn} onPress={fetchReports}>
             <Text style={styles.refreshText}>{loadingReports ? "..." : "Refrescar"}</Text>
           </TouchableOpacity>
@@ -1185,6 +1274,58 @@ export default function App() {
         ) : (
           <Text style={styles.reportDescMuted}>Reporte no disponible.</Text>
         )}
+      </BottomSheet>
+
+
+      <BottomSheet
+        visible={showScoreboard}
+        onClose={() => setShowScoreboard(false)}
+        title="Scoreboard"
+      >
+        <Text style={styles.sheetHint}>Cada ticket cerrado vale 10 puntos.</Text>
+        {leaderboardSource === "local" && (
+          <Text style={styles.base64Hint}>
+            Nota: Mostrando scoreboard calculado localmente (falta habilitar /leaderboard en el backend).
+          </Text>
+        )}
+
+        {loadingLeaderboard ? (
+          <View style={{ paddingVertical: 10 }}>
+            <ActivityIndicator />
+          </View>
+        ) : leaderboard.length ? (
+          <FlatList
+            data={leaderboard}
+            keyExtractor={(it, idx) => String(it.userId || it.id || idx)}
+            ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+            renderItem={({ item, index }) => {
+              const pts = Number(item.points ?? item.score ?? 0) || 0;
+              const name = item.name || item.displayName || item.username || "Usuario";
+              const rank = getRankLabel(pts);
+              const color = getRankColor(pts);
+              return (
+                <View style={styles.leaderItem}>
+                  <Text style={styles.leaderPos}>#{index + 1}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.leaderName} numberOfLines={1}>{name}</Text>
+                    <View style={styles.leaderMetaRow}>
+                      <Text style={styles.leaderPoints}>{pts} pts</Text>
+                      <View style={[styles.rankBadgeSmall, { backgroundColor: color }]}>
+                        <Text style={styles.rankBadgeSmallText}>{rank}</Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              );
+            }}
+          />
+        ) : (
+          <Text style={styles.menuEmpty}>Aún no hay datos en el scoreboard.</Text>
+        )}
+
+        <Text style={styles.base64Hint}>
+          Rangos: 10–99 Soldado verde · 100–499 Emisario verde · 500+ Embajador verde
+        </Text>
       </BottomSheet>
 </KeyboardAvoidingView>
   );
@@ -1576,6 +1717,95 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     paddingVertical: 8,
     textAlign: "center",
+  },
+
+
+  // Botón Scoreboard
+  scoreBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 5,
+  },
+  scoreBtnText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  // Puntos y rango en userBox
+  pointsRow: {
+    marginTop: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  pointsText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  rankBadge: {
+    paddingHorizontal: 8,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rankBadgeText: {
+    color: "white",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+
+  // Leaderboard list
+  leaderItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#F9FAFB",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 14,
+    padding: 10,
+  },
+  leaderPos: {
+    width: 34,
+    textAlign: "center",
+    fontWeight: "900",
+    color: "#111827",
+  },
+  leaderName: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  leaderMetaRow: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  leaderPoints: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#374151",
+  },
+  rankBadgeSmall: {
+    paddingHorizontal: 8,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rankBadgeSmallText: {
+    color: "white",
+    fontSize: 10,
+    fontWeight: "900",
   },
 
 });
