@@ -1,21 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Modal,
-  TextInput,
-  Pressable,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
-  Alert,
-  Share,
-  Image,
-  FlatList,
-  Dimensions,
-} from "react-native";
+import {View,
+ Text,
+ StyleSheet,
+ TouchableOpacity,
+ Modal,
+ TextInput,
+ Pressable,
+ KeyboardAvoidingView,
+ Platform,
+ ActivityIndicator,
+ Alert,
+ Share,
+ Image,
+ FlatList,
+ Dimensions,
+ ScrollView,
+ Keyboard,
+ Animated as RNAnimated,
+ Easing} from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import Geolocation from "react-native-geolocation-service";
 import { PermissionsAndroid } from "react-native";
@@ -41,25 +43,82 @@ const API_BASE = String(API_URL).replace(/\/reports\/?$/, "");
 
 /** ---------- Bottom Sheet Modal ---------- */
 function BottomSheet({ visible, onClose, title, children, overlay }) {
+  const [keyboardH, setKeyboardH] = useState(0);
+  const translateY = useRef(new RNAnimated.Value(0)).current;
+  const { height: screenH } = Dimensions.get("window");
+  const EXTRA_LIFT = 120; // Pixel 9: lift extra para que no tape descripción
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", (e) => {
+      const h = e?.endCoordinates?.height || 0;
+      setKeyboardH(h);
+      RNAnimated.timing(translateY, {
+        toValue: -(h - EXTRA_LIFT),
+        duration: 180,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start();
+    });
+
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardH(0);
+      RNAnimated.timing(translateY, {
+        toValue: 0,
+        duration: 160,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start();
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [translateY]);
+
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable
+        style={styles.backdrop}
+        onPress={() => {
+          Keyboard.dismiss();
+          onClose();
+        }}
+      >
         {overlay}
-        <Pressable style={styles.sheet} onPress={() => {}}>
-          <View style={styles.sheetHeader}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>{title}</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Text style={styles.sheetClose}>✕</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.sheetContent}>{children}</View>
-        </Pressable>
+
+        <RNAnimated.View
+          style={[
+            styles.sheet,
+            {
+              transform: [{ translateY }],
+              maxHeight: keyboardH ? screenH - keyboardH - 10 : screenH * 0.78,
+            },
+          ]}
+        >
+          <Pressable onPress={() => {}}>
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHandle} />
+              <Text style={styles.sheetTitle}>{title}</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  Keyboard.dismiss();
+                  onClose();
+                }}
+              >
+                <Text style={styles.sheetClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.sheetContent}>{children}</View>
+          </Pressable>
+        </RNAnimated.View>
       </Pressable>
     </Modal>
   );
 }
-
 
 /** ---------- Dropdown Menu (anclado) ---------- */
 function DropdownMenu({ visible, onClose, anchor, items, onSelect }) {
@@ -141,6 +200,9 @@ function alertError(title, message) {
 export default function App() {
   const mapRef = useRef(null);
   const mapRegionRef = useRef(null);
+
+  const createScrollRef = useRef(null);  // ✅ requerido por ScrollView ref
+  const [descY, setDescY] = useState(0); // ✅ requerido por el scroll de “Descripción”
 
   const normalizeStatus = (value) => (value ?? "").toString().trim().toLowerCase();
 
@@ -1048,19 +1110,41 @@ export default function App() {
       </BottomSheet>
 
       <BottomSheet visible={showCreate} onClose={() => setShowCreate(false)} title="Crear reporte">
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <TextInput
+        <ScrollView
+          ref={createScrollRef}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 260, flexGrow: 1 }}
+          showsVerticalScrollIndicator={false}
+        >
+<TextInput
             placeholder="Título"
             value={newTitle}
             onChangeText={setNewTitle}
+            onFocus={() => {
+              setTimeout(() => createScrollRef.current?.scrollTo({ y, animated: true }), 80);
+            }}
             style={styles.input}
+          />
+                    <View
+            onLayout={(e) => {
+              setDescY(e.nativeEvent.layout.y);
+            }}
           />
           <TextInput
             placeholder="Descripción"
             value={newDesc}
             onChangeText={setNewDesc}
+            onFocus={() => {
+              setTimeout(() => {
+                const yPos = Math.max(0, (descY || 0) - 20);
+                createScrollRef.current?.scrollTo({ y: yPos, animated: true });
+              }, 180);
+            }}
             style={[styles.input, { height: 90 }]}
             multiline
+            textAlignVertical="top"
           />
 
           <Text style={styles.label}>Status</Text>
@@ -1106,7 +1190,7 @@ export default function App() {
             Nota: Las fotos se están enviando como Base64 (temporal). Esto puede aumentar el tamaño del
             documento en la base de datos.
           </Text>
-        </KeyboardAvoidingView>
+        </ScrollView>
       </BottomSheet>
 
       <BottomSheet
