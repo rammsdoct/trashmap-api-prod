@@ -14,10 +14,11 @@ import {View,
  Image,
  FlatList,
  Dimensions,
- ScrollView,
  Keyboard,
  Animated as RNAnimated,
- Easing} from "react-native";
+ Easing,
+ ScrollView} from "react-native";
+import { Animated } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import Geolocation from "react-native-geolocation-service";
 import { PermissionsAndroid } from "react-native";
@@ -46,7 +47,9 @@ function BottomSheet({ visible, onClose, title, children, overlay }) {
   const [keyboardH, setKeyboardH] = useState(0);
   const translateY = useRef(new RNAnimated.Value(0)).current;
   const { height: screenH } = Dimensions.get("window");
-  const EXTRA_LIFT = 120; // Pixel 9: lift extra para que no tape descripción
+
+  // Pixel 9 (Gboard) suele requerir un lift extra
+  const EXTRA_LIFT = 120;
 
   useEffect(() => {
     const showSub = Keyboard.addListener("keyboardDidShow", (e) => {
@@ -78,6 +81,8 @@ function BottomSheet({ visible, onClose, title, children, overlay }) {
 
   if (!visible) return null;
 
+  const maxH = keyboardH ? screenH - keyboardH - 10 : screenH * 0.78;
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable
@@ -94,7 +99,7 @@ function BottomSheet({ visible, onClose, title, children, overlay }) {
             styles.sheet,
             {
               transform: [{ translateY }],
-              maxHeight: keyboardH ? screenH - keyboardH - 10 : screenH * 0.78,
+              maxHeight: maxH,
             },
           ]}
         >
@@ -200,9 +205,8 @@ function alertError(title, message) {
 export default function App() {
   const mapRef = useRef(null);
   const mapRegionRef = useRef(null);
-
-  const createScrollRef = useRef(null);  // ✅ requerido por ScrollView ref
-  const [descY, setDescY] = useState(0); // ✅ requerido por el scroll de “Descripción”
+  const createScrollRef = useRef(null);
+  const [descY, setDescY] = useState(0);
 
   const normalizeStatus = (value) => (value ?? "").toString().trim().toLowerCase();
 
@@ -1110,24 +1114,14 @@ export default function App() {
       </BottomSheet>
 
       <BottomSheet visible={showCreate} onClose={() => setShowCreate(false)} title="Crear reporte">
-        <ScrollView
-          ref={createScrollRef}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: 260, flexGrow: 1 }}
-          showsVerticalScrollIndicator={false}
-        >
-<TextInput
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+          <TextInput
             placeholder="Título"
             value={newTitle}
             onChangeText={setNewTitle}
-            onFocus={() => {
-              setTimeout(() => createScrollRef.current?.scrollTo({ y, animated: true }), 80);
-            }}
             style={styles.input}
           />
-                    <View
+          <View
             onLayout={(e) => {
               setDescY(e.nativeEvent.layout.y);
             }}
@@ -1136,12 +1130,6 @@ export default function App() {
             placeholder="Descripción"
             value={newDesc}
             onChangeText={setNewDesc}
-            onFocus={() => {
-              setTimeout(() => {
-                const yPos = Math.max(0, (descY || 0) - 20);
-                createScrollRef.current?.scrollTo({ y: yPos, animated: true });
-              }, 180);
-            }}
             style={[styles.input, { height: 90 }]}
             multiline
             textAlignVertical="top"
@@ -1190,7 +1178,7 @@ export default function App() {
             Nota: Las fotos se están enviando como Base64 (temporal). Esto puede aumentar el tamaño del
             documento en la base de datos.
           </Text>
-        </ScrollView>
+        </KeyboardAvoidingView>
       </BottomSheet>
 
       <BottomSheet
@@ -1566,7 +1554,11 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     paddingBottom: 18,
-  },
+  
+  width: '100%',
+  alignSelf: 'stretch',
+  minHeight: 220,
+},
   sheetHeader: {
     paddingTop: 10,
     paddingHorizontal: 16,
