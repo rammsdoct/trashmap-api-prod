@@ -722,6 +722,8 @@ export default function App() {
       base64: a.base64,
       type: a.type || "image/jpeg",
       name: a.fileName || `photo_${Date.now()}.jpg`,
+      fromCamera: false, //no internal jpg
+      geo: null,        // no gps internal jpg
     });
   };
 
@@ -745,11 +747,29 @@ export default function App() {
       return;
     }
 
+    
+    let geo = null;
+    try {
+      const hasLoc = await requestLocationPermission();
+      if (hasLoc) {
+        const loc = await getCurrentPosition();
+        geo = {
+          latitude: loc?.coords?.latitude,
+          longitude: loc?.coords?.longitude,
+          accuracy: loc?.coords?.accuracy,
+          capturedAt: new Date().toISOString(),
+        };
+      }
+    } catch (_) {}
+
+
     setter({
       uri: a.uri,
       base64: a.base64,
       type: a.type || "image/jpeg",
       name: a.fileName || `photo_${Date.now()}.jpg`,
+      fromCamera: true,
+      geo,
     });
   };
 
@@ -818,12 +838,36 @@ export default function App() {
       return;
     }
 
+    
+    // ✅ AQUI VA LO QUE TE FALTA (pegalo aquí)
+    if (nextStatus === "in_progress" || nextStatus === "closed") {
+      // 1) Debe ser foto tomada con cámara
+      if (!stagePhoto?.fromCamera) {
+        Alert.alert(
+          "Foto requerida",
+          "Para este cambio de estado debes TOMAR una foto con la cámara (no galería)."
+        );
+        return;
+      }
+
+      // 2) Debe tener GPS
+      const lat = stagePhoto?.geo?.latitude;
+      const lng = stagePhoto?.geo?.longitude;
+
+      if (lat == null || lng == null) {
+        Alert.alert(
+          "Ubicación requerida",
+          "Activa ubicación y toma la foto nuevamente para registrar coordenadas."
+        );
+        return;
+      }
+    }
     setUpdatingReport(true);
     try {
       await axios.put(`${API}/${reportId}`, {
         status: nextStatus,
         photoStage: nextStatus, // "in_progress" o "closed"
-        photo: { base64: stagePhoto.base64, type: stagePhoto.type, name: stagePhoto.name },
+        photo: { base64: stagePhoto.base64, type: stagePhoto.type, name: stagePhoto.name, geo: stagePhoto.geo },
       });
 
       // refresca y limpia
@@ -1143,7 +1187,7 @@ export default function App() {
 
           <Text style={styles.label}>Foto inicial (Abierto)</Text>
           <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-            <TouchableOpacity style={styles.photoBtn} onPress={() => pickPhoto(setPhotoOpen)}>
+            <TouchableOpacity style={styles.photoBtn} onPress={() => Alert.alert( "Solo cámara", "Para pasar a En progreso debes TOMAR una foto con la cámara y ubicación." )}>
               <Text style={styles.photoBtnText}>Galería</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.photoBtn} onPress={() => takePhoto(setPhotoOpen)}>
@@ -1299,7 +1343,7 @@ export default function App() {
               <>
                 <Text style={styles.label}>Foto para “Cerrado”</Text>
                 <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-                  <TouchableOpacity style={styles.photoBtn} onPress={() => pickPhoto(setPhotoClosed)}>
+                  <TouchableOpacity style={styles.photoBtn} onPress={() => Alert.alert( "Solo cámara","Para Cerrar debes TOMAR una foto con la cámara y ubicación." )}>
                     <Text style={styles.photoBtnText}>Galería</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.photoBtn} onPress={() => takePhoto(setPhotoClosed)}>
