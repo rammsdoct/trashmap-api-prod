@@ -778,6 +778,26 @@ export default function App() {
       Alert.alert("Falta título", "Escribe un título para el reporte.");
       return;
     }
+
+    
+    if (!photoOpen?.base64) {
+      Alert.alert("Falta foto", "Para crear un reporte debes TOMAR una foto con la cámara.");
+      return;
+    }
+    if (!photoOpen?.fromCamera) {
+      Alert.alert("Solo cámara", "La foto para crear reporte debe ser tomada con cámara (no galería).");
+      return;
+    }
+    const latP = photoOpen?.geo?.latitude;
+    const lngP = photoOpen?.geo?.longitude;
+    if (latP == null || lngP == null) {
+      Alert.alert(
+        "Ubicación requerida",
+        "Activa ubicación y toma la foto nuevamente para registrar coordenadas."
+      );
+      return;
+    }
+
     setCreating(true);
     try {
       const hasPermission = await requestLocationPermission();
@@ -801,7 +821,7 @@ export default function App() {
 
         photos: {
           open: photoOpen
-            ? { base64: photoOpen.base64, type: photoOpen.type, name: photoOpen.name }
+            ? { base64: photoOpen.base64, type: photoOpen.type, name: photoOpen.name, geo: photoOpen.geo }
             : null,
           in_progress: null,
           closed: null,
