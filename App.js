@@ -59,7 +59,7 @@ function BottomSheet({ visible, onClose, title, children, overlay }) {
         toValue: -(h - EXTRA_LIFT),
         duration: 180,
         easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
+        useNativeDriver: false,
       }).start();
     });
 
@@ -69,7 +69,7 @@ function BottomSheet({ visible, onClose, title, children, overlay }) {
         toValue: 0,
         duration: 160,
         easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
+        useNativeDriver: false,
       }).start();
     });
 
@@ -208,6 +208,8 @@ export default function App() {
   const createScrollRef = useRef(null);
   const [descY, setDescY] = useState(0);
 
+
+
   const normalizeStatus = (value) => (value ?? "").toString().trim().toLowerCase();
 
   const getStatusLabel = (value) => {
@@ -215,6 +217,8 @@ export default function App() {
     if (status === "open" || status === "abierto") return "Abierto";
     if (status === "in_progress" || status === "en progreso" || status === "progreso")
       return "En progreso";
+    if (status === "closed_pending_validation") return "Cerrado (en validación)";
+    if (status === "validated" || status === "validado") return "Cerrado (Validado)";
     if (status === "closed" || status === "cerrado") return "Cerrado";
     return value ? String(value) : "Sin estado";
   };
@@ -260,6 +264,9 @@ export default function App() {
 
 
   const [user, setUser] = useState(null);
+  const [idToken, setIdToken] = useState(null);
+  const idTokenRef = useRef(null);
+  const refreshPromiseRef = useRef(null); // evita refresh paralelo
   const [signingIn, setSigningIn] = useState(false);
   const [reports, setReports] = useState([]);
   const [selectedStatus, setSelectedStatus] = useState("all");
@@ -275,6 +282,7 @@ export default function App() {
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newStatus, setNewStatus] = useState("open");
+  
 
   // Fotos por etapa (temporal: base64 en el payload)
   const [photoOpen, setPhotoOpen] = useState(null);
@@ -288,6 +296,8 @@ export default function App() {
   const [leaderboard, setLeaderboard] = useState([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
   const [leaderboardSource, setLeaderboardSource] = useState("api");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [validating, setValidating] = useState(false);
 
 
   const region = useMemo(
@@ -301,10 +311,23 @@ export default function App() {
   );
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser || null);
-      if (currentUser) setShowLogin(false);
+      if (currentUser) { setShowLogin(false);
+        try {
+          const token = await currentUser.getIdToken(false);
+          setIdToken(token || null);
+          idTokenRef.current = token || null;
+        } catch (e) {
+          setIdToken(null);
+          idTokenRef.current = null;
+        }
+      } else {
+        setIdToken(null);
+        idTokenRef.current = null;
+      }
     });
+
     return unsubscribe;
   }, []);
 
@@ -345,10 +368,144 @@ export default function App() {
     signOut(auth);
   };
 
+// ===============================
+// Axios instance con Bearer + Auto Refresh on 401
+// ===============================
+  const api = useMemo(() => {
+    const instance = axios.create();
+
+    // 1) Adjunta Bearer siempre (y si falta token, lo pide "just in time")
+    instance.interceptors.request.use(async (config) => {
+      let token = idTokenRef.current;
+
+    // ✅ Fix 401: evita race condition después de login
+      if (!token) {
+        const currentUser = auth.currentUser;
+        if (currentUser) {
+          try {
+            token = await currentUser.getIdToken(false);
+            setIdToken(token || null);
+            idTokenRef.current = token || null;
+          } catch (_) {
+            token = null;
+          }
+        }
+      }
+
+      if (token) {
+        config.headers = config.headers || {};
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+
+    return config;
+  });
+
+  // 2) Si el backend responde 401, refresca token y reintenta 1 vez
+  instance.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+      const original = error?.config;
+      const status = error?.response?.status;
+
+      if (status !== 401 || !original || original._retry) {
+        return Promise.reject(error);
+      }
+      original._retry = true;
+
+      try {
+        // Evita refresh paralelo
+        if (!refreshPromiseRef.current) {
+          refreshPromiseRef.current = (async () => {
+            const currentUser = auth.currentUser;
+            if (!currentUser) throw new Error("No authenticated user");
+
+            const newToken = await currentUser.getIdToken(true); // fuerza refresh
+            setIdToken(newToken || null);
+            idTokenRef.current = newToken || null;
+            return newToken;
+          })().finally(() => {
+            refreshPromiseRef.current = null;
+          });
+        }
+
+        const refreshed = await refreshPromiseRef.current;
+
+        original.headers = original.headers || {};
+        original.headers.Authorization = `Bearer ${refreshed}`;
+
+        return instance(original);
+      } catch (_) {
+        return Promise.reject(error);
+      }
+    }
+  );
+
+  return instance;
+}, []);
+
+  // ===============================
+  // ADMIN: validar reportes (solo si eres admin)
+  // ===============================
+  const fetchIsAdmin = async () => {
+    try {
+      const res = await api.get(`${API_BASE}/me/admin`);
+      setIsAdmin(!!res?.data?.isAdmin);
+    } catch (_) {
+      setIsAdmin(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!user) {
+      setIsAdmin(false);
+      return;
+    }
+    fetchIsAdmin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  const adminValidateReport = async (reportId) => {
+
+  if (validating) return; // ✅ evita multi-click
+  setValidating(true);
+
+  try {
+    const res = await api.post(`${API_BASE}/reports/${reportId}/validate`);
+
+    // El backend normalmente regresa { ok: true, report: updatedItem, ... }
+    const updated = res?.data?.report || res?.data;
+
+    // ✅ Actualiza el reporte abierto (para que el botón desaparezca)
+    if (updated?.status) {
+      setSelectedReport((prev) => (prev ? { ...prev, ...updated } : updated));
+    }
+
+    await fetchReports();
+    Alert.alert("✅ Validado", "Reporte validado y puntos otorgados.");
+  } catch (e) {
+    const status = e?.response?.status;
+    const data = e?.response?.data;
+
+    // ✅ 409: lo tratamos como “ya no aplica”
+    if (status === 409) {
+      await fetchReports();
+      Alert.alert("Info", "Este reporte ya no está en validación (posiblemente ya fue validado).");
+    } else {
+      Alert.alert(
+        "Error al validar",
+        `${status ? `HTTP ${status}\n` : ""}${data ? JSON.stringify(data) : (e?.message || "Sin detalle")}`
+      );
+    }
+  } finally {
+    setValidating(false);
+  }
+};
+
+
   const fetchReports = async () => {
     setLoadingReports(true);
     try {
-      const res = await axios.get(API);
+      const res = await api.get(API);
       setReports(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.log(err);
@@ -362,7 +519,7 @@ export default function App() {
     setLoadingLeaderboard(true);
     try {
       // Endpoint público: GET /leaderboard
-      const res = await axios.get(`${API_BASE}/leaderboard`);
+      const res = await api.get(`${API_BASE}/leaderboard`);
       setLeaderboard(Array.isArray(res.data) ? res.data : []);
     setLeaderboardSource("api");
     } catch (e) {
@@ -402,7 +559,22 @@ export default function App() {
     const base =
       selectedStatus === "all"
         ? reports
-        : reports.filter((r) => normalizeStatus(r.status) === normalizeStatus(selectedStatus));
+        : reports.filter((r) => {
+          const s = normalizeStatus(r.status);
+          const sel = normalizeStatus(selectedStatus);
+          // ✅ Si el usuario eligió "CERRADOS", incluye también estados de validación
+          if (sel === "closed" || sel === "cerrado") {
+            return (
+              s === "closed" ||
+              s === "cerrado" ||
+              s === "closed_pending_validation" ||
+              s === "validated" ||
+              s === "validado"
+            );
+          }
+
+          return s === sel;
+        });
 
     return base
       .filter(
@@ -516,7 +688,13 @@ export default function App() {
       })
       .filter((r) => {
         const s = normalizeStatus(r.status);
-        return s === "closed" || s === "cerrado";
+        return (
+          s === "closed" ||
+          s === "cerrado" ||
+          s === "closed_pending_validation" ||
+          s === "validated" ||
+          s === "validado"
+        );
       })
       .filter(
         (r) =>
@@ -533,6 +711,49 @@ export default function App() {
       }))
       .sort((a, b) => Number(b.id) - Number(a.id));
   }, [reports, user]);
+
+  
+    // ===============================
+    // ADMIN: listas globales (no son "mis reportes")
+    // ===============================
+  const pendingValidationReports = useMemo(() => {
+    return (Array.isArray(reports) ? reports : [])
+      .filter((r) => normalizeStatus(r.status) === "closed_pending_validation")
+      .filter(
+        (r) =>
+          r.latitude != null &&
+          r.longitude != null &&
+          !isNaN(Number(r.latitude)) &&
+          !isNaN(Number(r.longitude))
+      )
+      .map((r) => ({
+        ...r,
+        latitude: Number(r.latitude),
+        longitude: Number(r.longitude),
+        id: String(r.id),
+      }))
+      .sort((a, b) => Number(b.id) - Number(a.id));
+  }, [reports]);
+
+  const validatedReports = useMemo(() => {
+    return (Array.isArray(reports) ? reports : [])
+      .filter((r) => normalizeStatus(r.status) === "validated" || normalizeStatus(r.status) === "validado")
+      .filter(
+        (r) =>
+          r.latitude != null &&
+          r.longitude != null &&
+          !isNaN(Number(r.latitude)) &&
+          !isNaN(Number(r.longitude))
+      )
+      .map((r) => ({
+        ...r,
+        latitude: Number(r.latitude),
+        longitude: Number(r.longitude),
+        id: String(r.id),
+      }))
+      .sort((a, b) => Number(b.id) - Number(a.id));
+  }, [reports]);
+
 
   // Puntos: 10 por ticket cerrado (fallback local)
   const myPoints = useMemo(() => (myClosedReports.length || 0) * 10, [myClosedReports.length]);
@@ -828,7 +1049,7 @@ export default function App() {
         },
       };
 
-      await axios.post(API, payload);
+      await api.post(API, payload);
 
       setNewTitle("");
       setNewDesc("");
@@ -883,25 +1104,32 @@ export default function App() {
       }
     }
     setUpdatingReport(true);
-    try {
-      await axios.put(`${API}/${reportId}`, {
+    try {    
+      // 👇 IMPORTANTE: guarda la respuesta del backend
+      const res = await api.put(`${API}/${reportId}`, {
         status: nextStatus,
-        photoStage: nextStatus, // "in_progress" o "closed"
-        photo: { base64: stagePhoto.base64, type: stagePhoto.type, name: stagePhoto.name, geo: stagePhoto.geo },
-      });
+        photoStage: nextStatus,
+        photo: {
+        base64: stagePhoto.base64,
+        type: stagePhoto.type,
+        name: stagePhoto.name,
+        geo: stagePhoto.geo,
+      },
+    });
 
-      // refresca y limpia
-      if (nextStatus === "in_progress") setPhotoInProgress(null);
-      if (nextStatus === "closed") setPhotoClosed(null);
+      // ✅ El backend puede cambiar el status (ej: closed -> closed_pending_validation)
+      const serverStatus = res?.data?.status || nextStatus;
 
       await fetchReports();
-      Alert.alert("Listo", `Actualizado a ${getStatusLabel(nextStatus)}.`);
 
-      // Actualiza seleccionado con datos frescos (si existe)
-      const refreshed = (Array.isArray(reports) ? reports : [])
-        .map((r) => ({ ...r, id: String(r.id) }))
-        .find((r) => String(r.id) === String(reportId));
-      if (refreshed) setSelectedReport(refreshed);
+      // ✅ Muestra el status REAL que devolvió el backend (no el que enviaste)
+      Alert.alert("Listo", `Actualizado a ${getStatusLabel(serverStatus)}.`);
+
+      // ✅ Actualiza el reporte seleccionado con lo que regresó el backend
+      if (res?.data) {
+        setSelectedReport((prev) => (prev ? { ...prev, ...res.data } : res.data));
+      }
+
     } catch (e) {
       console.log(e);
       Alert.alert("Error", "No se pudo actualizar el reporte.");
@@ -1110,6 +1338,92 @@ export default function App() {
             )}
           </View>
 
+          
+            {/* ===== ADMIN ONLY: En validación ===== */}
+            {isAdmin && (
+              <>
+              <TouchableOpacity
+                style={[styles.userBoxPill, styles.pillProgress]}
+                onPress={() => toggleUserList("pending_validation")}
+              >
+                  <Text style={styles.userBoxPillText} numberOfLines={1}>
+                    En validación
+                  </Text>
+                  <View style={[styles.countBadge, styles.badgeProgress]}>
+                    <Text style={styles.countBadgeText}>{pendingValidationReports.length}</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {expandedUserList === "pending_validation" && (
+                  <View style={styles.inlineList}>
+                    <FlatList
+                      data={pendingValidationReports}
+                      keyExtractor={(it) => it.id}
+                      nestedScrollEnabled
+                      ListEmptyComponent={<Text style={styles.inlineEmpty}>Sin reportes.</Text>}
+                      renderItem={({ item }) => (
+                        <TouchableOpacity
+                          style={styles.inlineItem}
+                          onPress={() => {
+                            setExpandedUserList(null);
+                            openReport(item);
+                          }}
+                        >
+                          <Text style={styles.inlineItemTitle} numberOfLines={1}>
+                            {item.title?.trim() || `Reporte ${item.id}`}
+                          </Text>
+                          <Text style={styles.inlineItemMeta} numberOfLines={1}>
+                            ID: {item.id}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    />
+                  </View>
+                )}
+
+                {/* ===== ADMIN ONLY: Validados ===== */}
+                <TouchableOpacity
+                  style={[styles.userBoxPill, styles.pillClosed]}
+                  onPress={() => toggleUserList("validated")}
+                >
+                  <Text style={styles.userBoxPillText} numberOfLines={1}>
+                    Validados
+                  </Text>
+                  <View style={[styles.countBadge, styles.badgeClosed]}>
+                    <Text style={styles.countBadgeText}>{validatedReports.length}</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {expandedUserList === "validated" && (
+                  <View style={styles.inlineList}>
+                    <FlatList
+                      data={validatedReports}
+                      keyExtractor={(it) => it.id}
+                      nestedScrollEnabled
+                      ListEmptyComponent={<Text style={styles.inlineEmpty}>Sin reportes.</Text>}
+                      renderItem={({ item }) => (
+                        <TouchableOpacity
+                          style={styles.inlineItem}
+                          onPress={() => {
+                            setExpandedUserList(null);
+                            openReport(item);
+                          }}
+                        >
+                          <Text style={styles.inlineItemTitle} numberOfLines={1}>
+                            {item.title?.trim() || `Reporte ${item.id}`}
+                          </Text>
+                          <Text style={styles.inlineItemMeta} numberOfLines={1}>
+                            ID: {item.id}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    />
+                  </View>
+                )}
+              </>
+            )}
+
+
           <TouchableOpacity onPress={handleSignOut}>
             <Text style={{ color: "red", fontSize: 10 }}>Cerrar sesión</Text>
           </TouchableOpacity>
@@ -1306,6 +1620,20 @@ export default function App() {
                 {getStatusLabel(selectedReport.status)}
               </Text>
             </View>
+            
+
+            {/* Botón Admin: Validar (+ puntos) */}
+            {isAdmin && normalizeStatus(selectedReport?.status) === 'Validacion_Pendiente' && (
+              <View style={{ marginTop: 12, gap: 10 }}>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, { backgroundColor: '#2563EB' }]}
+                  onPress={() => adminValidateReport(selectedReport.id)}
+                >
+                  <Text style={styles.primaryBtnText}>✅ Validar (+ puntos)</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
 
             {/* Acciones con foto por etapa */}
             {isOpenStatus(selectedReport.status) && (
