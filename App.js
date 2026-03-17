@@ -1336,7 +1336,6 @@ export default function App() {
                 />
               </View>
             )}
-          </View>
 
           
             {/* ===== ADMIN ONLY: En validación ===== */}
@@ -1422,6 +1421,7 @@ export default function App() {
                 )}
               </>
             )}
+          </View>
 
 
           <TouchableOpacity onPress={handleSignOut}>
