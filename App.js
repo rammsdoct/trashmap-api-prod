@@ -1623,7 +1623,7 @@ export default function App() {
             
 
             {/* Botón Admin: Validar (+ puntos) */}
-            {isAdmin && normalizeStatus(selectedReport?.status) === 'Validacion_Pendiente' && (
+            {isAdmin && normalizeStatus(selectedReport?.status) === 'closed_pending_validation' && (
               <View style={{ marginTop: 12, gap: 10 }}>
                 <TouchableOpacity
                   style={[styles.primaryBtn, { backgroundColor: '#2563EB' }]}
