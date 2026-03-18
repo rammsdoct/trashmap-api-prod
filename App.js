@@ -3,6 +3,8 @@ import {View,
  Text,
  StyleSheet,
  TouchableOpacity,
+ ImageBackground,
+ Linking,
  Modal,
  TextInput,
  Pressable,
@@ -298,6 +300,16 @@ export default function App() {
   const [leaderboardSource, setLeaderboardSource] = useState("api");
   const [isAdmin, setIsAdmin] = useState(false);
   const [validating, setValidating] = useState(false);
+  const [showIntro, setShowIntro] = useState(true);
+  const [introStep, setIntroStep] = useState(0); // 0 = imagen, 1 = texto
+  const [showIntroImage, setShowIntroImage] = useState(true); // Página 1
+  const [showIntroText, setShowIntroText] = useState(false);  // Página 2
+
+
+
+
+
+  const INTRO_IMAGE = require("./assets/intro/keriambakerani_intro.png");
 
 
   const region = useMemo(
@@ -367,6 +379,34 @@ export default function App() {
     } catch (_) {}
     signOut(auth);
   };
+
+    // ===============================
+  // DONACIONES: "Invítanos un café" (PayPal / Tel)
+  // ===============================
+  const DONATE_PAYPAL = "rammsdoct";
+  const DONATE_PHONE = "#4491931535";
+
+  const openDonate = async () => {
+    // Intento abrir PayPal.Me si el usuario lo tiene; si no, solo mostramos datos para copiar.
+    const url = `https://www.paypal.me/${DONATE_PAYPAL}`;
+    try {
+      const can = await Linking.canOpenURL(url);
+      if (can) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert(
+          "Invítanos un café ☕",
+          `PayPal: ${DONATE_PAYPAL}\nTel: ${DONATE_PHONE}`
+        );
+      }
+    } catch (_) {
+      Alert.alert(
+        "Invítanos un café ☕",
+        `PayPal: ${DONATE_PAYPAL}\nTel: ${DONATE_PHONE}`
+      );
+    }
+  };
+
 
 // ===============================
 // Axios instance con Bearer + Auto Refresh on 401
@@ -477,6 +517,16 @@ export default function App() {
 
     // ✅ Actualiza el reporte abierto (para que el botón desaparezca)
     if (updated?.status) {
+      setSelectedReport((prev) => (prev ? { ...prev, ...updated } : updated));
+    }
+
+   
+    if (updated?.id) {
+      setReports((prev) =>
+        (Array.isArray(prev) ? prev : []).map((r) =>
+          String(r.id) === String(updated.id) ? { ...r, ...updated } : r
+        )
+      );
       setSelectedReport((prev) => (prev ? { ...prev, ...updated } : updated));
     }
 
@@ -1476,6 +1526,161 @@ export default function App() {
         )}
       </View>
 
+        <BottomSheet
+        visible={showIntroText}
+        onClose={() => {
+          setShowIntroText(false);
+          setShowIntroImage(false);
+        }}
+        title="KeriAmbakerani"
+      >
+        {/* =====================
+            INTRO – PAGE 1 (IMAGEN)
+          ===================== */}
+        {introStep === 0 && (
+          <>
+            <ImageBackground
+              source={INTRO_IMAGE}
+              style={{ width: "100%", height: 260, borderRadius: 16, overflow: "hidden" }}
+              resizeMode="cover"
+            >
+              <View
+                style={{
+                  flex: 1,
+                  backgroundColor: "rgba(0,0,0,0.4)",
+                  padding: 16,
+                  justifyContent: "flex-end",
+                }}
+              >
+                <Text style={{ color: "white", fontSize: 24, fontWeight: "900" }}>
+                  KeriAmbakerani
+                </Text>
+                <Text style={{ color: "white", fontSize: 13, fontWeight: "700" }}>
+                  Limpieza Grande · La Presa
+                </Text>
+              </View>
+            </ImageBackground>
+
+            <View style={{ height: 16 }} />
+
+            <TouchableOpacity
+              style={[styles.primaryBtn, { backgroundColor: "#2563EB" }]}
+              onPress={() => setIntroStep(1)}
+            >
+              <Text style={styles.primaryBtnText}>Continuar</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {/* =====================
+            INTRO – PAGE 2 (TEXTO)
+          ===================== */}
+        {introStep === 1 && (
+          <>
+            <Text style={styles.sheetHint}>
+              <Text style={{ fontWeight: "800" }}>KeriAmbakerani</Text> significa
+              {" "}“Limpieza Grande” en p’urhépecha: una iniciativa comunitaria para
+              cuidar La Presa.
+            </Text>
+
+            <View style={{ height: 10 }} />
+
+            <Text style={styles.label}>Cómo funciona</Text>
+            <Text style={styles.sheetHint}>1) Reporta un punto (+) con foto y ubicación.</Text>
+            <Text style={styles.sheetHint}>2) Da seguimiento: Abierto → En progreso → Cerrado (en validación).</Text>
+            <Text style={styles.sheetHint}>3) Admins validan y se otorgan puntos cuando queda “Validado”.</Text>
+            <Text style={styles.sheetHint}>4) Revisa el Scoreboard 🏆 para ver el impacto.</Text>
+
+            <View style={{ height: 14 }} />
+
+            <Text style={styles.label}>Invítanos un café ☕</Text>
+            <Text style={styles.sheetHint}>Tu apoyo mantiene la app activa y sostenible.</Text>
+            <Text style={[styles.sheetHint, { fontWeight: "800" }]}>PayPal: rammsdoct</Text>
+            <Text style={[styles.sheetHint, { fontWeight: "800" }]}>Tel: #4491931535</Text>
+
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
+              <TouchableOpacity
+                style={[styles.primaryBtn, { flex: 1, backgroundColor: "#2563EB" }]}
+                onPress={openDonate}
+              >
+                <Text style={styles.primaryBtnText}>Invítanos un café</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.primaryBtn, { flex: 1, backgroundColor: "#111827" }]}
+                onPress={() => {
+                  setShowIntroText(false);
+                  setShowIntroImage(false);
+                }}
+              >
+                <Text style={styles.primaryBtnText}>¡Empecemos!</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.base64Hint, { marginTop: 10 }]}>
+              Creada por dankenet.org · App sostenible para ayudar al medio ambiente.
+            </Text>
+          </>
+        )}
+      </BottomSheet>
+      
+      <Modal visible={showIntroImage} transparent animationType="fade">
+        <ImageBackground
+          source={INTRO_IMAGE}
+          style={{ flex: 1 }}
+          resizeMode="cover"
+        >
+          {/* Overlay oscuro para legibilidad */}
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.35)" }}>
+            {/* Botón cerrar (X) arriba */}
+            <View style={{ position: "absolute", top: 40, right: 16, zIndex: 10 }}>
+              <TouchableOpacity
+                onPress={() => setShowIntroImage(false)}
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: "rgba(0,0,0,0.45)",
+                }}
+              >
+                <Text style={{ color: "white", fontSize: 18, fontWeight: "900" }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Título abajo */}
+            <View style={{ flex: 1, justifyContent: "flex-end", padding: 18 }}>
+              <Text style={{ color: "white", fontSize: 28, fontWeight: "900" }}>
+                KeriAmbakerani
+              </Text>
+              <Text style={{ color: "white", fontSize: 13, fontWeight: "700", opacity: 0.95 }}>
+                Limpieza Grande · La Presa
+              </Text>
+
+              <View style={{ height: 14 }} />
+
+              {/* Botón continuar */}
+              <TouchableOpacity
+                onPress={() => {
+                  setShowIntroImage(false);
+                  setShowIntroText(true);
+                }}
+                style={{
+                  backgroundColor: "#2563EB",
+                  paddingVertical: 14,
+                  borderRadius: 14,
+                  alignItems: "center",
+                }}
+              >
+                <Text style={{ color: "white", fontWeight: "900" }}>Continuar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ImageBackground>
+      </Modal>
+
+
       <BottomSheet visible={showLogin} onClose={() => setShowLogin(false)} title="Iniciar sesión">
         <Text style={styles.sheetHint}>Inicia sesión con Google para crear reportes.</Text>
         <TouchableOpacity
@@ -1786,6 +1991,46 @@ export default function App() {
         ) : (
           <Text style={styles.menuEmpty}>Aún no hay datos en el scoreboard.</Text>
         )}
+        
+          <View style={{ height: 16 }} />
+
+          <View
+            style={{
+              borderTopWidth: 1,
+              borderColor: "#E5E7EB",
+              paddingTop: 12,
+              gap: 8,
+            }}
+          >
+            <Text style={[styles.label, { textAlign: "center", marginTop: 0 }]}>
+              Invítanos un café ☕
+            </Text>
+
+            <Text style={[styles.sheetHint, { textAlign: "center" }]}>
+              Tu apoyo mantiene KeriAmbakerani activa y sostenible.
+            </Text>
+
+            <Text style={[styles.sheetHint, { textAlign: "center", fontWeight: "800" }]}>
+              PayPal: rammsdoct
+            </Text>
+            <Text style={[styles.sheetHint, { textAlign: "center", fontWeight: "800" }]}>
+              Tel: #4491931535
+            </Text>
+
+            <TouchableOpacity
+              style={[
+              styles.primaryBtn,
+                { backgroundColor: "#2563EB", alignSelf: "center", minWidth: 200 },
+              ]}
+              onPress={openDonate}
+            >
+              <Text style={styles.primaryBtnText}>Invitar un café</Text>
+            </TouchableOpacity>
+
+            <Text style={[styles.base64Hint, { textAlign: "center" }]}>
+              Creada por dankenet.org
+            </Text>
+          </View>
 
         <Text style={styles.base64Hint}>
           Rangos: 10–99 Soldado verde · 100–499 Emisario verde · 500+ Embajador verde
