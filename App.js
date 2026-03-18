@@ -247,6 +247,34 @@ export default function App() {
     return "#6B7280"; // gris
   };
 
+  const isPendingValidationStatus = (value) => {
+    const status = normalizeStatus(value);
+    return status === "closed_pending_validation";
+  };
+
+  const isValidatedStatus = (value) => {
+    const status = normalizeStatus(value);
+    return status === "validated" || status === "validado";
+  };
+
+  // Ícono del pin por estado (minimalista)
+  const getStatusIcon = (value) => {
+    if (isValidatedStatus(value)) return "✅";
+    if (isPendingValidationStatus(value)) return "🕒";
+    if (isInProgressStatus(value)) return "🧹";
+    if (isOpenStatus(value)) return "🗑️";
+    return "📍";
+  };
+
+  const getPinStyleByStatus = (value) => {
+    if (isValidatedStatus(value)) return styles.pinValidated;
+    if (isPendingValidationStatus(value)) return styles.pinPending;
+    if (isInProgressStatus(value)) return styles.pinProgress;
+    if (isOpenStatus(value)) return styles.pinOpen;
+    return styles.pinClosed;
+  };
+
+
   // Rangos por puntos
   const getRankLabel = (points) => {
     const p = Number(points) || 0;
@@ -262,6 +290,13 @@ export default function App() {
     if (p >= 100) return "#22C55E";
     if (p >= 10) return "#4ADE80";
     return "#9CA3AF";
+  };
+    // Medallas para el Top 3 (Scoreboard)
+  const getMedal = (index) => {
+    if (index === 0) return "🥇";
+    if (index === 1) return "🥈";
+    if (index === 2) return "🥉";
+    return "";
   };
 
 
@@ -281,6 +316,7 @@ export default function App() {
   const [creating, setCreating] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [selectedReport, setSelectedReport] = useState(null);
+  const [previewReport, setPreviewReport] = useState(null); // preview card del mapa
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newStatus, setNewStatus] = useState("open");
@@ -310,6 +346,21 @@ export default function App() {
 
 
   const INTRO_IMAGE = require("./assets/intro/keriambakerani_intro.png");
+
+  // ===============================
+  // MAPA: estilo limpio (más visual)
+  // ===============================
+  const MAP_STYLE_CLEAN = [
+    { elementType: "geometry", stylers: [{ color: "#f5f5f5" }] },
+    { elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
+    { elementType: "labels.text.stroke", stylers: [{ color: "#f5f5f5" }] },
+    { featureType: "poi", stylers: [{ visibility: "off" }] },
+    { featureType: "transit", stylers: [{ visibility: "off" }] },
+    { featureType: "road", elementType: "geometry", stylers: [{ color: "#ffffff" }] },
+    { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#e5e7eb" }] },
+    { featureType: "water", elementType: "geometry", stylers: [{ color: "#b3e5fc" }] },
+  ];
+
 
 
   const region = useMemo(
@@ -900,13 +951,23 @@ export default function App() {
     setShowReport(true);
   };
 
+  const openPreviewReport = (report) => {
+    if (!report) return;
+    setPreviewReport(report);
+    // ✅ mueve el mapa suavemente al pin
+    focusReport(report);
+  };
+
+
   const openReport = (report) => {
     if (!report) return;
+    setPreviewReport(null);
     setNavStack([report.id]);
     selectReport(report);
   };
 
   const closeReport = () => {
+    setPreviewReport(null);
     setShowReport(false);
     setSelectedReport(null);
     setNavStack([]);
@@ -1254,6 +1315,7 @@ export default function App() {
       keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
     >
       <MapView
+  customMapStyle={MAP_STYLE_CLEAN}
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
         initialRegion={region}
@@ -1270,9 +1332,18 @@ export default function App() {
           <Marker
             key={r.id}
             coordinate={{ latitude: r.latitude, longitude: r.longitude }}
-            pinColor={getPinColor(r.status)}
-            onPress={() => openReport(r)}
-          />
+            onPress={() => openPreviewReport(r)}
+          >
+            <View
+              style={[
+                styles.pinWrap,
+                getPinStyleByStatus(r.status),
+                selectedReport?.id === r.id && styles.pinSelected,
+              ]}
+            >
+              <Text style={styles.pinIcon}>{getStatusIcon(r.status)}</Text>
+            </View>
+          </Marker>
         ))}
       </MapView>
 
@@ -1284,6 +1355,34 @@ export default function App() {
       )}
 
       <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
+
+      {/* Preview card del pin (mapa) */}
+      {!showReport && previewReport && (
+        <View style={styles.previewCard} pointerEvents="auto">
+          <Text style={styles.previewTitle} numberOfLines={1}>
+            {previewReport.title?.trim() || `Reporte ${previewReport.id}`}
+          </Text>
+          <Text style={styles.previewMeta} numberOfLines={1}>
+            {getStatusLabel(previewReport.status)}
+          </Text>
+
+          <View style={styles.previewBtns}>
+            <TouchableOpacity
+              style={[styles.previewBtn, { backgroundColor: "#111827" }]}
+              onPress={() => openReport(previewReport)}
+            >
+              <Text style={styles.previewBtnText}>Ver detalle</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.previewBtn, { backgroundColor: "#6B7280" }]}
+              onPress={() => setPreviewReport(null)}
+            >
+              <Text style={styles.previewBtnText}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
         {user && (
         <View style={styles.userBox} pointerEvents="auto">
           <Text style={{ fontSize: 12 }} numberOfLines={1}>
@@ -1504,8 +1603,12 @@ export default function App() {
           <TouchableOpacity style={styles.scoreBtn} onPress={openScoreboard}>
             <Text style={styles.scoreBtnText}>🏆</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.refreshBtn} onPress={fetchReports}>
-            <Text style={styles.refreshText}>{loadingReports ? "..." : "Refrescar"}</Text>
+          <TouchableOpacity
+            style={[styles.refreshIconBtn, loadingReports && { opacity: 0.6 }]}
+            onPress={fetchReports}
+            disabled={loadingReports}
+          >
+            <Text style={styles.refreshIconText}>{loadingReports ? "…" : "⟳"}</Text>
           </TouchableOpacity>
         </View>
 
@@ -1526,103 +1629,73 @@ export default function App() {
         )}
       </View>
 
-        <BottomSheet
-        visible={showIntroText}
-        onClose={() => {
-          setShowIntroText(false);
-          setShowIntroImage(false);
-        }}
-        title="KeriAmbakerani"
-      >
-        {/* =====================
-            INTRO – PAGE 1 (IMAGEN)
-          ===================== */}
-        {introStep === 0 && (
-          <>
-            <ImageBackground
-              source={INTRO_IMAGE}
-              style={{ width: "100%", height: 260, borderRadius: 16, overflow: "hidden" }}
-              resizeMode="cover"
-            >
-              <View
-                style={{
-                  flex: 1,
-                  backgroundColor: "rgba(0,0,0,0.4)",
-                  padding: 16,
-                  justifyContent: "flex-end",
-                }}
-              >
-                <Text style={{ color: "white", fontSize: 24, fontWeight: "900" }}>
-                  KeriAmbakerani
-                </Text>
-                <Text style={{ color: "white", fontSize: 13, fontWeight: "700" }}>
-                  Limpieza Grande · La Presa
-                </Text>
-              </View>
-            </ImageBackground>
+		<BottomSheet
+		visible={showIntroText}
+		onClose={() => {
+			setShowIntroText(false);
+			setShowIntroImage(false);
+		}}
+		title="KeriAmbakerani"
+		>
+		{/* ===== INTRO – PAGE 2 (TEXTO) ===== */}
 
-            <View style={{ height: 16 }} />
-
-            <TouchableOpacity
-              style={[styles.primaryBtn, { backgroundColor: "#2563EB" }]}
-              onPress={() => setIntroStep(1)}
-            >
-              <Text style={styles.primaryBtnText}>Continuar</Text>
-            </TouchableOpacity>
-          </>
-        )}
-
-        {/* =====================
-            INTRO – PAGE 2 (TEXTO)
-          ===================== */}
-        {introStep === 1 && (
-          <>
-            <Text style={styles.sheetHint}>
-              <Text style={{ fontWeight: "800" }}>KeriAmbakerani</Text> significa
-              {" "}“Limpieza Grande” en p’urhépecha: una iniciativa comunitaria para
-              cuidar La Presa.
-            </Text>
-
-            <View style={{ height: 10 }} />
-
-            <Text style={styles.label}>Cómo funciona</Text>
-            <Text style={styles.sheetHint}>1) Reporta un punto (+) con foto y ubicación.</Text>
-            <Text style={styles.sheetHint}>2) Da seguimiento: Abierto → En progreso → Cerrado (en validación).</Text>
-            <Text style={styles.sheetHint}>3) Admins validan y se otorgan puntos cuando queda “Validado”.</Text>
-            <Text style={styles.sheetHint}>4) Revisa el Scoreboard 🏆 para ver el impacto.</Text>
-
-            <View style={{ height: 14 }} />
-
-            <Text style={styles.label}>Invítanos un café ☕</Text>
-            <Text style={styles.sheetHint}>Tu apoyo mantiene la app activa y sostenible.</Text>
-            <Text style={[styles.sheetHint, { fontWeight: "800" }]}>PayPal: rammsdoct</Text>
-            <Text style={[styles.sheetHint, { fontWeight: "800" }]}>Tel: #4491931535</Text>
-
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
-              <TouchableOpacity
-                style={[styles.primaryBtn, { flex: 1, backgroundColor: "#2563EB" }]}
-                onPress={openDonate}
-              >
-                <Text style={styles.primaryBtnText}>Invítanos un café</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.primaryBtn, { flex: 1, backgroundColor: "#111827" }]}
-                onPress={() => {
-                  setShowIntroText(false);
-                  setShowIntroImage(false);
-                }}
-              >
-                <Text style={styles.primaryBtnText}>¡Empecemos!</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={[styles.base64Hint, { marginTop: 10 }]}>
-              Creada por dankenet.org · App sostenible para ayudar al medio ambiente.
-            </Text>
-          </>
-        )}
-      </BottomSheet>
+		<Text style={styles.introTitle}>KeriAmbakerani</Text>
+		<Text style={styles.introSubtitle}>“Limpieza Grande” · La Presa</Text>
+		
+		<View style={{ height: 8 }} />
+		
+		<Text style={styles.introBody}>
+			Tu reporte ayuda a organizar acciones, validar avances y medir resultados.
+		</Text>
+		
+		<View style={{ height: 14 }} />
+		
+		<View style={styles.introCard}>
+			<Text style={styles.introCardTitle}>Cómo funciona</Text>
+		
+			<Text style={styles.introBullet}>1) 📍 Reporta un punto (+) con foto y ubicación.</Text>
+			<Text style={styles.introBullet}>2) 🧹 Actualiza el estado cuando avances.</Text>
+			<Text style={styles.introBullet}>3) 🕒 Cierra → queda en validación.</Text>
+			<Text style={styles.introBullet}>4) ✅ Admin valida → se asignan puntos.</Text>
+		</View>
+		
+		<View style={{ height: 14 }} />
+		
+		<View style={styles.introCardAlt}>
+			<Text style={styles.introCardTitle}>Invítanos un café ☕</Text>
+			<Text style={styles.introBody}>
+			¿Te sirve la app? Tu apoyo la mantiene activa y sostenible.
+			</Text>
+		
+			<View style={{ height: 8 }} />
+		
+			<Text style={styles.introStrong}>PayPal: rammsdoct</Text>
+			<Text style={styles.introStrong}>Tel: #4491931535</Text>
+		
+			<View style={{ height: 12 }} />
+		
+			<View style={{ flexDirection: "row", gap: 10 }}>
+				<TouchableOpacity
+					style={[styles.primaryBtn, { flex: 1, backgroundColor: "#2563EB" }]}
+					onPress={openDonate}
+				>
+					<Text style={styles.primaryBtnText}>Invitar un café</Text>
+					</TouchableOpacity>
+		
+					<TouchableOpacity
+					style={[styles.primaryBtn, { flex: 1, backgroundColor: "#111827" }]}
+					onPress={() => {
+					setShowIntroText(false);
+					setShowIntroImage(false);
+						}}
+					>
+					<Text style={styles.primaryBtnText}>¡Empecemos!</Text>
+				</TouchableOpacity>
+				</View>
+			</View>
+		
+			<Text style={styles.introFooter}>dankenet.org</Text>
+		</BottomSheet>
       
       <Modal visible={showIntroImage} transparent animationType="fade">
         <ImageBackground
@@ -1785,6 +1858,57 @@ export default function App() {
               <Text style={styles.reportDescMuted}>Sin descripción.</Text>
             )}
 
+             <View style={styles.reportMetaRow}>
+
+              <Text style={styles.reportMetaLabel}>Estado</Text>
+
+             <View
+                style={[
+                  styles.statusBadge,
+                    isOpenStatus(selectedReport.status)
+                    ? styles.statusBadgeOpen
+                    : isInProgressStatus(selectedReport.status)
+                    ? styles.statusBadgeProgress
+                    : normalizeStatus(selectedReport.status) === "closed_pending_validation"
+                    ? styles.statusBadgePending
+                    : normalizeStatus(selectedReport.status) === "validated"
+                    ? styles.statusBadgeValidated
+                    : styles.statusBadgeClosed,
+                ]}
+              >
+                <Text style={styles.statusBadgeText}>
+                  {getStatusLabel(selectedReport.status)}
+                </Text>
+              </View>
+            </View>
+
+            {/* Hint solo en validación */}
+            {normalizeStatus(selectedReport.status) === "closed_pending_validation" && (
+              <Text style={styles.base64Hint}>
+                Este reporte está cerrado por el usuario y está pendiente de validación por un admin.
+              </Text>
+            )}
+            
+
+            {/* Botón Admin: Validar (+ puntos) */}
+            {isAdmin && normalizeStatus(selectedReport?.status) === 'closed_pending_validation' && (
+              <View style={{ marginTop: 12, gap: 10 }}>
+                <TouchableOpacity
+                  style={[
+                    styles.primaryBtn,
+                    { backgroundColor: "#2563EB" },
+                    validating && { opacity: 0.6 },
+                  ]}
+                  onPress={() => adminValidateReport(selectedReport.id)}
+                  disabled={validating}
+                >
+                  <Text style={styles.primaryBtnText}>
+                    {validating ? "Validando..." : "✅ Validar (+ puntos)"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* Fotos guardadas (si el backend devuelve photos.{stage}.base64 ) */}
             {renderPhotoFromBase64(selectedReport?.photos?.open) ? (
               <Image
@@ -1809,36 +1933,6 @@ export default function App() {
                 resizeMode="cover"
               />
             ) : null}
-
-            <View style={styles.reportMetaRow}>
-              <Text style={styles.reportMetaLabel}>Estado</Text>
-              <Text
-                style={[
-                  styles.reportStatus,
-                  isOpenStatus(selectedReport.status)
-                    ? styles.reportStatusOpen
-                    : isInProgressStatus(selectedReport.status)
-                    ? styles.reportStatusProgress
-                    : styles.reportStatusClosed,
-                ]}
-              >
-                {getStatusLabel(selectedReport.status)}
-              </Text>
-            </View>
-            
-
-            {/* Botón Admin: Validar (+ puntos) */}
-            {isAdmin && normalizeStatus(selectedReport?.status) === 'closed_pending_validation' && (
-              <View style={{ marginTop: 12, gap: 10 }}>
-                <TouchableOpacity
-                  style={[styles.primaryBtn, { backgroundColor: '#2563EB' }]}
-                  onPress={() => adminValidateReport(selectedReport.id)}
-                >
-                  <Text style={styles.primaryBtnText}>✅ Validar (+ puntos)</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
 
             {/* Acciones con foto por etapa */}
             {isOpenStatus(selectedReport.status) && (
@@ -1945,13 +2039,17 @@ export default function App() {
         )}
       </BottomSheet>
 
-
       <BottomSheet
         visible={showScoreboard}
         onClose={() => setShowScoreboard(false)}
         title="Scoreboard"
       >
         <Text style={styles.sheetHint}>Cada ticket cerrado vale 10 puntos.</Text>
+
+        <View style={styles.scoreHero}>
+          <Text style={styles.scoreHeroTitle}>💚 Gracias por cuidar La Presa</Text>
+          <Text style={styles.scoreHeroText}>Cada reporte validado suma. ¡Sigamos con la Limpieza Grande!</Text>
+        </View>
         {leaderboardSource === "local" && (
           <Text style={styles.base64Hint}>
             Nota: Mostrando scoreboard calculado localmente (falta habilitar /leaderboard en el backend).
@@ -1973,11 +2071,16 @@ export default function App() {
               const rank = getRankLabel(pts);
               const color = getRankColor(pts);
               return (
-                <View style={styles.leaderItem}>
-                  <Text style={styles.leaderPos}>#{index + 1}</Text>
+                <View style={[styles.leaderItem, index < 3 && styles.leaderItemTop]}>
+                  <Text style={styles.leaderPos}>{getMedal(index)} #{index + 1}</Text>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.leaderName} numberOfLines={1}>{name}</Text>
                     <View style={styles.leaderMetaRow}>
+                      {index < 3 && (
+                        <View style={styles.topBadge}>
+                          <Text style={styles.topBadgeText}>TOP</Text>
+                        </View>
+                      )}
                       <Text style={styles.leaderPoints}>{pts} pts</Text>
                       <View style={[styles.rankBadgeSmall, { backgroundColor: color }]}>
                         <Text style={styles.rankBadgeSmallText}>{rank}</Text>
@@ -2007,7 +2110,7 @@ export default function App() {
             </Text>
 
             <Text style={[styles.sheetHint, { textAlign: "center" }]}>
-              Tu apoyo mantiene KeriAmbakerani activa y sostenible.
+              Tu apoyo mantiene PresaWatch activa y sostenible.
             </Text>
 
             <Text style={[styles.sheetHint, { textAlign: "center", fontWeight: "800" }]}>
@@ -2051,6 +2154,50 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     elevation: 6,
     maxWidth: 240,
+
+  },
+  // ===== MAP PREVIEW CARD =====
+  previewCard: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 210, // arriba de los botones flotantes (+ y ubicación)
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+
+    // 👇 asegura que se vea encima en Android
+    elevation: 20,
+    zIndex: 999,
+  },
+  previewTitle: {
+    fontWeight: "900",
+    color: "#111827",
+    fontSize: 14,
+  },
+  previewMeta: {
+    marginTop: 4,
+    color: "#6B7280",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  previewBtns: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 10,
+  },
+  previewBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  previewBtnText: {
+    color: "white",
+    fontWeight: "900",
   },
   filterRow: {
     position: "absolute",
@@ -2521,4 +2668,90 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
 
+  // ===== SCOREBOARD POLISH =====
+  scoreHero: {
+    marginTop: 10,
+    marginBottom: 10,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "rgba(22,163,74,0.10)",
+    borderWidth: 1,
+    borderColor: "rgba(22,163,74,0.18)",
+  },
+  scoreHeroTitle: {
+    fontWeight: "900",
+    color: "#14532D",
+    fontSize: 14,
+  },
+  scoreHeroText: {
+    marginTop: 4,
+    color: "#166534",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  leaderItemTop: {
+    borderColor: "rgba(37,99,235,0.25)",
+    backgroundColor: "rgba(37,99,235,0.06)",
+  },
+  topBadge: {
+    marginLeft: "auto",
+    backgroundColor: "#111827",
+    paddingHorizontal: 8,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  topBadgeText: {
+    color: "white",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+  },
+  photoLabel: {
+    marginTop: 10,
+    fontWeight: "900",
+    color: "#111827",
+    fontSize: 12,
+  },
+  
+  	// ===== Header: botón refrescar compacto (icono) =====
+  refreshIconBtn: {
+	  marginLeft: 6,
+	  width: 34,
+	  height: 3  , 	
+	  borderRadiu  : 17, 	
+	  backgroundColor: "#  563EB", 	
+	  alignItems: "center",   
+	  justifyContent: "center",
+	  elevation: 5,
+  },
+  refreshIconText: {
+	  color: "white",
+	  fontSize: 16,
+	  fontWeight: "900",
+	  lineHeight: 18,
+  },
+
+  // ===== Report modal: status badge =====
+  statusBadge: {
+    paddingHorizontal: 10,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statusBadgeText: {
+    color: "white",
+    fontWeight: "900",
+    fontSize: 11,
+  },
+  statusBadgeOpen: { backgroundColor: "#EF4444" },
+  statusBadgeProgress: { backgroundColor: "#F59E0B" },
+  statusBadgePending: { backgroundColor: "#2563EB" },
+  statusBadgeValidated: { backgroundColor: "#16A34A" },
+  statusBadgeClosed: { backgroundColor: "#6B7280" },
+
+
 });
+
