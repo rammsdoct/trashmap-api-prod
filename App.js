@@ -1835,6 +1835,17 @@ export default function App() {
             documento en la base de datos.
           </Text>
         </KeyboardAvoidingView>
+        
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: 140 }}
+        >
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+            {/* TODO tu contenido actual de Crear reporte aquí adentro */}
+          </KeyboardAvoidingView>
+        </ScrollView>
+
       </BottomSheet>
 
       <BottomSheet
